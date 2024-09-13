@@ -13,6 +13,8 @@ from model.MLP import MLP
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
+from utils import normalize_data
+
 
 class CrowPeas:
 
@@ -21,7 +23,8 @@ class CrowPeas:
     config_filename: str
     config_dir: str
     config: dict
-    norm_params: dict
+    norm_params_spectra: dict
+    norm_params_parameters: dict
 
     # parameters related to general neural network
     neural_network: dict
@@ -178,7 +181,12 @@ class CrowPeas:
                 )
 
         self.title = self.config["general"]["title"]
-        self.norm_params = self.config["general"].get("norm_params", None)
+        self.norm_params_spectra = self.config["general"].get(
+            "norm_params_spectra", None
+        )
+        self.norm_params_parameters = self.config["general"].get(
+            "norm_params_parameters", None
+        )
 
         if self.config["general"]["mode"].lower().startswith("t"):
             self.training_mode = True
@@ -289,7 +297,8 @@ class CrowPeas:
                 "title": self.title,
                 "mode": "training" if self.training_mode else "inference",
                 "seed": self.seed,
-                "norm_params": self.norm_params,
+                "norm_params_spectra": self.norm_params_spectra,
+                "norm_params_parameters": self.norm_params_parameters,
             },
             "training": (
                 {
@@ -384,9 +393,20 @@ class CrowPeas:
         else:
             seed = self.seed
 
+        # TODO: read normal_params
+        normalized_spectra, norm_spectra_params = normalize_data(
+            self.synthetic_spectra.spectra
+        )
+        normalized_parameters, norm_parameters_params = normalize_data(
+            self.synthetic_spectra.parameters
+        )
+
+        self.norm_params_spectra = norm_spectra_params
+        self.norm_params_parameters = norm_parameters_params
+
         self.data_loader = CrowPeasDataModule(
-            spectra=self.synthetic_spectra.spectra,
-            parameters=self.synthetic_spectra.parameters,
+            spectra=normalized_spectra,
+            parameters=normalized_parameters,
             random_seed=seed,
         )
         self.data_loader.setup(setup)
@@ -491,7 +511,6 @@ class CrowPeas:
 
         self.model = torch.compile(self.model)
         callback = self.create_checkpoint_callback()
-        checkpoint = os.path.join(self.checkpoint_dir, self.checkpoint_name)
 
         trainer = pl.Trainer(max_epochs=self.epochs, callbacks=[callback])
         trainer.fit(
@@ -520,6 +539,7 @@ def main():
         .load_and_validate_config()
         .load_synthetic_spectra()
         .prepare_dataloader()
+        .save_config(path)
         .train()
     )
 
