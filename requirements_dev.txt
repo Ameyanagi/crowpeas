@@ -1,0 +1,23 @@
+pip
+bump2version
+wheel
+watchdog
+tox
+coverage
+sphinx
+twine
+ruff
+
+pytest
+
+# please install pytorch of your self
+
+lightning
+pydantic
+numpy
+matplotlib
+xraylarch
+toml
+pyarrow
+pandas
+torchbnn
