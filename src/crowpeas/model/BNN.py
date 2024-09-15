@@ -8,7 +8,7 @@ from torchmetrics import MeanMetric, MinMetric
 import torchbnn as bnn
 
 from typing import Sequence
-from model.activation import ACTIVATIONS
+from .activation import ACTIVATIONS
 
 
 class CustomLoss(nn.Module):

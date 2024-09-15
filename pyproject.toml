@@ -7,27 +7,35 @@ name = "crowpeas"
 version = "0.1.0"
 description = "EXAFS fitting using Neural Network"
 readme = "README.rst"
-authors = [
-  {name = "Ameyanagi", email = "contact@ameyanagi.com"}
-]
-maintainers = [
-  {name = "Ameyanagi", email = "contact@ameyanagi.com"}
-]
-classifiers = [
-
-]
-license = {text = "MIT license"}
+authors = [{ name = "Ameyanagi", email = "contact@ameyanagi.com" }]
+maintainers = [{ name = "Ameyanagi", email = "contact@ameyanagi.com" }]
+classifiers = []
+license = { text = "MIT license" }
 dependencies = [
-  "typer"
+    "typer",
+    "lightning",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pytest",
+    "rich",
+    "toml",
+    "torch",
+    "torchbnn",
+    "torchmetrics",
+    "xraylarch",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "coverage",  # testing
-    "mypy",  # linting
-    "pytest",  # testing
-    "ruff"  # linting
+    "coverage", # testing
+    "pyright",  # linting
+    "pytest",   # testing
+    "ruff",     # linting
 ]
+
+[project.scripts]
+crowpeas = "crowpeas.cli:main"
 
 [project.urls]
 
@@ -36,28 +44,7 @@ changelog = "https://github.com/Ameyanagi/crowpeas/blob/master/changelog.md"
 homepage = "https://github.com/Ameyanagi/crowpeas"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.package-data]
 "*" = ["*.*"]
-
-
-
-
-# Mypy
-# ----
-
-[tool.mypy]
-files = "."
-
-# Use strict defaults
-strict = true
-warn_unreachable = true
-warn_no_return = true
-
-[[tool.mypy.overrides]]
-# Don't require test functions to include types
-module = "tests.*"
-allow_untyped_defs = true
-disable_error_code = "attr-defined"
-

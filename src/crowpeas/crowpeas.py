@@ -5,19 +5,18 @@ import os
 from typing import Sequence, Literal
 import json
 
-from data_generator import SyntheticSpectrum
-from data_loader import CrowPeasDataModule
+from .data_generator import SyntheticSpectrum
+from .data_loader import CrowPeasDataModule
 import lightning as pl
-from model.BNN import BNN
-from model.MLP import MLP
+from .model.BNN import BNN
+from .model.MLP import MLP
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from utils import normalize_data
+from .utils import normalize_data
 
 
 class CrowPeas:
-
     # general parameters
     title: str = ""
     config_filename: str
@@ -414,7 +413,6 @@ class CrowPeas:
         return self
 
     def get_training_data(self):
-
         if not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None:
             self.init_synthetic_spectra()
 
@@ -482,7 +480,6 @@ class CrowPeas:
         save_top_k: int = 1,
         mode: str = "min",
     ):
-
         return ModelCheckpoint(
             monitor=monitor,
             dirpath=self.checkpoint_dir,
@@ -492,15 +489,12 @@ class CrowPeas:
         )
 
     def train(self):
-
         if not self.training_mode:
             raise ValueError(
                 "Training mode is not enabled. Please set genera.mode to training"
             )
 
-        if (
-            not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None
-        ):  # noqa
+        if not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None:  # noqa
             self.init_synthetic_spectra()
 
         if not hasattr(self, "data_loader") or self.data_loader is None:
@@ -522,27 +516,27 @@ class CrowPeas:
         return self
 
 
-def main():
-
-    path = "./examples/training.toml"
-    crowpeas = CrowPeas()
-    # (
-    #     crowpeas.load_config(path)
-    #     .load_and_validate_config()
-    #     .init_synthetic_spectra()
-    #     .save_training_data()
-    #     .save_config(path)
-    # )
-    #
-    (
-        crowpeas.load_config(path)
-        .load_and_validate_config()
-        .load_synthetic_spectra()
-        .prepare_dataloader()
-        .save_config(path)
-        .train()
-    )
-
-
-if __name__ == "__main__":
-    main()
+# def main():
+#
+#     path = "./examples/training.toml"
+#     crowpeas = CrowPeas()
+#     # (
+#     #     crowpeas.load_config(path)
+#     #     .load_and_validate_config()
+#     #     .init_synthetic_spectra()
+#     #     .save_training_data()
+#     #     .save_config(path)
+#     # )
+#     #
+#     (
+#         crowpeas.load_config(path)
+#         .load_and_validate_config()
+#         .load_synthetic_spectra()
+#         .prepare_dataloader()
+#         .save_config(path)
+#         .train()
+#     )
+#
+#
+# if __name__ == "__main__":
+#     main()

@@ -1,0 +1,12 @@
+lightning
+matplotlib
+numpy
+pandas
+pytest
+rich
+toml
+torch
+torchbnn
+torchmetrics
+typer
+xraylarch

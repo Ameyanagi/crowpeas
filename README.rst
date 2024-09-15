@@ -19,6 +19,9 @@ crowpeas
 EXAFS fitting using Neural Network
 
 
+.. include:: docs/installation.rst
+
+
 * Free software: MIT license
 * Documentation: https://crowpeas.readthedocs.io.
 
