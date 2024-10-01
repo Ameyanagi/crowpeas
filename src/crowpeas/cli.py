@@ -1,20 +1,155 @@
 """Console script for crowpeas."""
-import crowpeas
 
 import typer
 from rich.console import Console
+from typing import Annotated
+from pathlib import Path
+import os
+import shutil
 
-app = typer.Typer()
+
+DIR_PATH = Path(__file__).parent
+
+
+app = typer.Typer(
+    no_args_is_help=True,
+    # callback=lambda: typer.echo(app.rich_help_panel),
+)
 console = Console()
 
 
 @app.command()
-def main():
-    """Console script for crowpeas."""
-    console.print("Replace this message by putting your code into "
-               "crowpeas.cli.main")
-    console.print("See Typer documentation at https://typer.tiangolo.com/")
-    
+def main(
+    config: Annotated[
+        str | None, typer.Argument(help="Config file path [toml or json]")
+    ] = None,
+    generate: Annotated[
+        bool, typer.Option("--generate", "-g", help="Generate config file")
+    ] = False,
+    training: Annotated[
+        bool,
+        typer.Option(
+            "--training",
+            "-t",
+            help="Option to train the model. True: Always train, False(default): Train only when it is configured in the config",
+        ),
+    ] = False,
+    dataset: Annotated[
+        bool,
+        typer.Option(
+            "--dataset",
+            "-d",
+            help="Option to generate dataset. True: Always generate, False(default): Generate only when it is configured in the config",
+        ),
+    ] = False,
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            "-r",
+            help="Option to resume training. True: Resume training, False(default): Start training from scratch",
+        ),
+    ] = False,
+    validate: Annotated[
+        bool,
+        typer.Option(
+            "--validate",
+            "-v",
+            help="Option to validate the config file. True: Validate only, False(default): Validate and run",
+        ),
+    ] = False,
+):
+    """
+    Crowpeas is a tool to perform a neural network based EXAFS analysis.
+    This cli will provide a training, prediction and evaluation interface.
+    """
+
+    if generate:
+
+        if config is None:
+            config = "config.toml"
+
+        console.print("Generating config file")
+        generate_config(config)
+        console.print(
+            "Config file generated. Please fill in the details and run the train command.\n"
+        )
+
+        console.print("Command: crowpeas -d -t -v <path_to_config_file>\n")
+        console.print("For more help: crowpeas --help")
+
+        return
+
+    if config is not None:
+        run_crowpeas(config, training, dataset, resume, validate)
+        return
+
+    if config is None:
+        typer.echo(app.rich_help_panel)
+        # console.print(app.rich_help_panel)
+
+
+def generate_config(config: str):
+    """
+    Generate a config file for the crowpeas tool.
+    """
+
+    config_path = os.path.join(DIR_PATH, "./sample_config.toml")
+    feff_path = os.path.join(DIR_PATH, "./Pt_feff0001.dat")
+
+    console.print(f"Generating config file at {config}")
+    shutil.copyfile(config_path, config)
+    console.print(f"Generating feff file at ./Pt_feff0001.dat")
+    shutil.copyfile(feff_path, "./Pt_feff0001.dat")
+
+
+def run_crowpeas(
+    config: str,
+    training: bool,
+    dataset: bool,
+    resume: bool,
+    validate: bool,
+):
+
+    from crowpeas.core import CrowPeas
+
+    console.print(f"Running crowpeas with config file: {config}")
+
+    cp = CrowPeas()
+    cp.load_config(config)
+    cp.load_and_validate_config()
+
+    if dataset:
+        console.print("Force dataset generation mode")
+        cp.init_synthetic_spectra(generate=True)
+        cp.save_training_data()
+        cp.save_config()
+    else:
+        console.print("Trying to load dataset, if exists")
+        cp.load_synthetic_spectra()
+        cp.save_config()
+
+    if resume:
+        console.print("Read checkpoint and resume training")
+        cp.load_model()
+
+    if training:
+        console.print("Force training mode")
+        cp.training_mode = True
+        cp.prepare_dataloader(setup="fit")
+        cp.save_config()
+
+        console.print("Training the model")
+        cp.train()
+
+    if validate:
+        console.print("Validating the config file")
+        cp.validate_model()
+        cp.plot_parity("./parity.png")
+        console.print("The parity plot is generated at parity.png")
+        cp.plot_test_spectra(1, save_path="./1.png")
+
+    return
 
 
 if __name__ == "__main__":

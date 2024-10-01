@@ -33,6 +33,20 @@ def normalize_data(
     return normalized_data, norm_params
 
 
+def normalize_spectra(spectra: np.ndarray) -> tuple[np.ndarray, dict]:
+    min_val = np.min(spectra)
+    max_val = np.max(spectra)
+
+    max_abs_val = np.max([np.abs(min_val), np.abs(max_val)])
+    normalized_spectra = spectra / max_abs_val
+
+    norm_params = {
+        "max_abs_val": max_abs_val,
+    }
+
+    return normalized_spectra, norm_params
+
+
 def interpolate_spectrum(
     original_k: np.ndarray, original_spectrum: np.ndarray, target_k: np.ndarray
 ) -> np.ndarray:
@@ -70,6 +84,11 @@ def denormalize_data(normalized_data: np.ndarray, norm_params: dict) -> np.ndarr
     ) + min_val
 
     return denormalized_data
+
+
+def denormalize_spectra(normalized_data: np.ndarray, norm_params: dict) -> np.ndarray:
+    max_abs_val = norm_params["max_abs_val"]
+    return normalized_data * max_abs_val
 
 
 def predict_and_denormalize(

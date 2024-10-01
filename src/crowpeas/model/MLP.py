@@ -4,7 +4,8 @@ from larch.xafs import ftwindow
 import numpy as np
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
-from torchmetrics import MeanMetric, MinMetric
+from torchmetrics import MeanMetric
+from torchmetrics.aggregation import MinMetric
 
 from typing import Sequence
 from .activation import ACTIVATIONS
@@ -13,6 +14,8 @@ from .activation import ACTIVATIONS
 class CustomLoss(nn.Module):
     def __init__(self, norm_params, alpha_list=None):
         super(CustomLoss, self).__init__()
+        self.save_hyperparameters()
+
         self.mse_loss = nn.MSELoss()
         self.norm_params = norm_params
         if alpha_list is None:
@@ -49,6 +52,7 @@ class MLP(pl.LightningModule):
         learning_rate=1e-3,
     ):
         super().__init__()
+        self.save_hyperparameters()
         self.input_form = input_form
         self.hidden_layers = hidden_layers
         self.learning_rate = learning_rate
@@ -159,7 +163,7 @@ class MLP(pl.LightningModule):
         for layer in hidden_layers:
             input_layers.append(layer)
 
-        output_layers = [layer for layer in hidden_layers[::-1]]
+        output_layers = [layer for layer in hidden_layers]
         output_layers.append(output_size)
 
         if activation.lower() in ACTIVATIONS.keys():
@@ -283,11 +287,12 @@ class MLP(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         loss = self.val_loss.compute()
-        self.val_loss_best(loss)
+
+        self.val_loss_best.update(loss)
 
         self.log(
             "val/loss_best",
-            self.val_loss_best,
+            self.val_loss_best.compute(),
             on_step=False,
             on_epoch=True,
             prog_bar=True,

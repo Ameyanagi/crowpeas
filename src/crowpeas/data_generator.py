@@ -13,6 +13,7 @@ from larch.xafs import (
     path2chi,
 )
 import pandas as pd
+from pathlib import Path
 
 
 class SyntheticSpectrum:
@@ -43,7 +44,9 @@ class SyntheticSpectrum:
     ):
         self.training_mode = training_mode
         self.num_examples = num_examples
-        self.k = None
+
+        path1 = feffpath(feff_path_file)
+        self.k = path1.k
 
         # This should be k_weighted_chi and add k_weight
         self.kweighted_chi = None
@@ -160,8 +163,18 @@ class SyntheticSpectrum:
         )
         spectra_df.to_feather(filename_spectra)
         parameters_df.to_feather(filename_parameters)
+
         print(f"Spectra data saved to {filename_spectra}")
         print(f"Parameters data saved to {filename_parameters}")
+
+    def exists_training_data(self, prefix="./synthetic"):
+        filename_spectra = f"{prefix}_spectra.feather"
+        filename_parameters = f"{prefix}_parameters.feather"
+
+        if Path(filename_spectra).is_file() and Path(filename_parameters).is_file():
+            return True
+
+        return False
 
     def load_training_data(self, prefix="./synthetic"):
 
