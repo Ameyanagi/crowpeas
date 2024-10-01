@@ -58,6 +58,14 @@ def main(
             help="Option to validate the config file. True: Validate only, False(default): Validate and run",
         ),
     ] = False,
+    experiment: Annotated[
+        bool,
+        typer.Option(
+            "--experiment",
+            "-e",
+            help="",
+        ),
+    ] = False,
 ):
     """
     Crowpeas is a tool to perform a neural network based EXAFS analysis.
@@ -65,7 +73,6 @@ def main(
     """
 
     if generate:
-
         if config is None:
             config = "config.toml"
 
@@ -81,7 +88,7 @@ def main(
         return
 
     if config is not None:
-        run_crowpeas(config, training, dataset, resume, validate)
+        run_crowpeas(config, training, dataset, resume, validate, experiment)
         return
 
     if config is None:
@@ -109,8 +116,8 @@ def run_crowpeas(
     dataset: bool,
     resume: bool,
     validate: bool,
+    experiment: bool,
 ):
-
     from crowpeas.core import CrowPeas
 
     console.print(f"Running crowpeas with config file: {config}")
@@ -148,6 +155,9 @@ def run_crowpeas(
         cp.plot_parity("./parity.png")
         console.print("The parity plot is generated at parity.png")
         cp.plot_test_spectra(1, save_path="./1.png")
+
+    if experiment:
+        pass
 
     return
 
