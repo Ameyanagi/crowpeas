@@ -34,6 +34,9 @@ class CrowPeas:
     config_filename: str
     config_dir: str
     config: dict
+    exp_config_filename: str
+    exp_config_dir: str
+    exp_config: dict
     norm_params_spectra: dict
     norm_params_parameters: dict
 
@@ -144,6 +147,17 @@ class CrowPeas:
             "output_dim",
             "hidden_dims",
         ]
+        required_for_expertiment = [
+            "dataset_dir",
+            "k_range",
+            "r_range",
+            "k_weight",
+        ]
+        required_for_artemis = [
+            "result",
+            "unc",
+
+        ]
 
         for section in required_sections:
             if section not in self.config:
@@ -203,6 +217,24 @@ class CrowPeas:
                 raise ValueError(
                     f"Parameter {param} is missing in architecture section of config file"
                 )
+
+        if "experiment" in self.config:
+            print("Experiment section found")
+            for param in required_for_expertiment:
+                if param not in self.config["experiment"]:
+                    raise ValueError(
+                        f"Parameter {param} is missing in experiment section of config file"
+                    )
+        
+        if "artemis" in self.config:
+            print("Artemis section found")
+            for param in required_for_artemis:
+                if param not in self.config["artemis"]:
+                    raise ValueError(
+                        f"Parameter {param} is missing in artemis section of config file"
+                    )
+
+            
 
         self.title = self.config["general"]["title"]
         self.norm_params_spectra = self.config["general"].get(
@@ -785,6 +817,10 @@ class CrowPeas:
             fig.savefig(save_path)
 
         return fig
+
+    def predict_on_experimental_data(self):
+        pass
+
 
     # def fit_laplace(self):
     #     if not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None:

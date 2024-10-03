@@ -3,50 +3,16 @@
 # Title of the project
 title = "Pt training"
 # Selection of the calculation mode. Possible values are "training", "inference"
-mode = "training"
+mode = "inference"
 
-# Required for training mode
-[training]
-# Path to the feff path file
-feffpath = "Pt_feff0001.dat"
-# Path to save the training data sets (relative to the config file or absolute path)
-training_set_dir = "training_set"
-# Filename
-training_data_prefix = "Pt training_training_data"
-num_examples = 10000
-spectrum_noise = true
-noise_range = [0.0, 0.01]
-k_range = [2.5, 12.5]
-k_weight = 2
-r_range = [1.7, 3.2]
-train_size_ratio = 0.8
-val_size_ratio = 0.1
-test_size_ratio = 0.1
-
-# Required for training and inference
+# Required for inference
 [neural_network]
 model_name = "Pt"
 model_dir = "model"
 checkpoint_dir = "checkpoint"
 checkpoint_name = "Pt"
 
-# Required in training mode.
-# Not used in inference mode.
-[training.param_ranges]
-s02 = [0.75, 1.2]
-degen = [4.0, 13.0]
-deltar = [-0.2, 0.2]
-sigma2 = [0.001, 0.02]
-e0 = [-10, 10]
-
-# Required in training mode.
-# Not used in inference mode.
-[neural_network.hyperparameters]
-epochs = 1000
-batch_size = 1000
-learning_rate = 0.001
-
-# Required in training mode and inference mode.
+# Required in inference mode.
 [neural_network.architecture]
 # Currently "MLP" and "BNN" are supported
 type = "MLP"
@@ -56,7 +22,7 @@ output_activation = "linear"
 output_dim = 4
 hidden_dims = [1024, 516, 516, 516, 516]
 
-# Required in experiment mode.
+# Required in inference mode.
 # Provide data in chi(k)
 [experimnetal_data.raw]
 # filepaths
