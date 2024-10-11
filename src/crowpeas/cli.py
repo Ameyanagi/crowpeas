@@ -112,7 +112,6 @@ def generate_config(config: str):
 
 def run_crowpeas(
     config: str,
-    exp_config: str,
     training: bool,
     dataset: bool,
     resume: bool,
@@ -161,8 +160,7 @@ def run_crowpeas(
 
     if experiment:
         console.print("Looking for experimental config file")
-        cp.load_exp_config(exp_config)
-        cp.predict_on_experimental_data()
+        
         
 
     return

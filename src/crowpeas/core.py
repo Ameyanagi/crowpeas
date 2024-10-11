@@ -307,6 +307,7 @@ class CrowPeas:
             self.val_size_ratio = self.config["training"].get("val_size_ratio", 0.1)
             self.test_size_ratio = self.config["training"].get("test_size_ratio", 0.1)
 
+
         self.epochs = self.config["neural_network"]["hyperparameters"]["epochs"]
         self.batch_size = self.config["neural_network"]["hyperparameters"]["batch_size"]
         self.learning_rate = self.config["neural_network"]["hyperparameters"][
@@ -350,7 +351,9 @@ class CrowPeas:
         return self
 
     def save_config(self, path: str | None = None):
-        self.config = {
+        
+        if "experiment" in self.config and "artemis" not in self.config:
+            self.config = {
             "general": {
                 "title": self.title,
                 "mode": "training" if self.training_mode else "inference",
@@ -396,7 +399,126 @@ class CrowPeas:
                 },
                 "k_grid": self.nn_k_grid,
             },
-        }
+            "experiment": {
+                "dataset_dir": self.config["experiment"]["dataset_dir"],
+                "k_range": self.config["experiment"]["k_range"],
+                "r_range": self.config["experiment"]["r_range"],
+                "k_weight": self.config["experiment"]["k_weight"],
+            },
+            
+            
+                }
+        if "experiment" in self.config and "artemis" in self.config:
+            self.config = {
+            "general": {
+                "title": self.title,
+                "mode": "training" if self.training_mode else "inference",
+                "seed": self.seed,
+                "norm_params_spectra": self.norm_params_spectra,
+                "norm_params_parameters": self.norm_params_parameters,
+            },
+            "training": (
+                {
+                    "feffpath": os.path.relpath(self.feff_path_file, self.config_dir),
+                    "training_set_dir": os.path.relpath(
+                        self.training_set_dir, self.config_dir
+                    ),
+                    "training_data_prefix": self.training_data_prefix,
+                    "num_examples": self.num_examples,
+                    "spectrum_noise": self.spectrum_noise,
+                    "noise_range": self.noise_range,
+                    "k_range": self.k_range,
+                    "k_weight": self.k_weight,
+                    "r_range": self.r_range,
+                    "train_size_ratio": self.train_size_ratio,
+                    "val_size_ratio": self.val_size_ratio,
+                    "test_size_ratio": self.test_size_ratio,
+                    "param_ranges": self.param_ranges,
+                }
+            ),
+            "neural_network": {
+                "model_name": self.model_name,
+                "model_dir": os.path.relpath(self.model_dir, self.config_dir),
+                "checkpoint_dir": os.path.relpath(self.checkpoint_dir, self.config_dir),
+                "checkpoint_name": self.checkpoint_name,
+                "hyperparameters": {
+                    "epochs": self.epochs,
+                    "batch_size": self.batch_size,
+                    "learning_rate": self.learning_rate,
+                },
+                "architecture": {
+                    "type": self.nn_type,
+                    "activation": self.nn_activation,
+                    "output_activation": self.nn_output_activation,
+                    "output_dim": self.nn_output_dim,
+                    "hidden_dims": self.nn_hidden_dims,
+                },
+                "k_grid": self.nn_k_grid,
+            },
+            "experiment": {
+                "dataset_dir": self.config["experiment"]["dataset_dir"],
+                "k_range": self.config["experiment"]["k_range"],
+                "r_range": self.config["experiment"]["r_range"],
+                "k_weight": self.config["experiment"]["k_weight"],
+            },
+            "artemis": {
+                "result": self.config["artemis"]["result"],
+                "unc": self.config["artemis"]["unc"],
+
+            },
+            
+            
+                }
+        else:
+
+            self.config = {
+                "general": {
+                    "title": self.title,
+                    "mode": "training" if self.training_mode else "inference",
+                    "seed": self.seed,
+                    "norm_params_spectra": self.norm_params_spectra,
+                    "norm_params_parameters": self.norm_params_parameters,
+                },
+                "training": (
+                    {
+                        "feffpath": os.path.relpath(self.feff_path_file, self.config_dir),
+                        "training_set_dir": os.path.relpath(
+                            self.training_set_dir, self.config_dir
+                        ),
+                        "training_data_prefix": self.training_data_prefix,
+                        "num_examples": self.num_examples,
+                        "spectrum_noise": self.spectrum_noise,
+                        "noise_range": self.noise_range,
+                        "k_range": self.k_range,
+                        "k_weight": self.k_weight,
+                        "r_range": self.r_range,
+                        "train_size_ratio": self.train_size_ratio,
+                        "val_size_ratio": self.val_size_ratio,
+                        "test_size_ratio": self.test_size_ratio,
+                        "param_ranges": self.param_ranges,
+                    }
+                ),
+                "neural_network": {
+                    "model_name": self.model_name,
+                    "model_dir": os.path.relpath(self.model_dir, self.config_dir),
+                    "checkpoint_dir": os.path.relpath(self.checkpoint_dir, self.config_dir),
+                    "checkpoint_name": self.checkpoint_name,
+                    "hyperparameters": {
+                        "epochs": self.epochs,
+                        "batch_size": self.batch_size,
+                        "learning_rate": self.learning_rate,
+                    },
+                    "architecture": {
+                        "type": self.nn_type,
+                        "activation": self.nn_activation,
+                        "output_activation": self.nn_output_activation,
+                        "output_dim": self.nn_output_dim,
+                        "hidden_dims": self.nn_hidden_dims,
+                    },
+                    "k_grid": self.nn_k_grid,
+                },
+                
+            }
 
         if path is not None:
             if path.endswith("toml"):
