@@ -21,7 +21,10 @@ from .utils import (
     denormalize_spectra,
     interpolate_spectrum,
 )
-from larch.xafs import xftf, xftr, feffpath, path2chi
+from larch.xafs import xftf, xftr, feffpath, path2chi, ftwindow
+from larch.io import read_ascii
+from larch.fitting import param, guess, param_group
+from larch import Group 
 import matplotlib.pyplot as plt
 
 # from laplace import Laplace, marglik_training
@@ -941,7 +944,50 @@ class CrowPeas:
         return fig
 
     def predict_on_experimental_data(self):
-        pass
+
+        krange = self.config["experiment"]["k_range"]
+        kmin = krange[0]
+        kmax = krange[1]
+        k_grid = self.config["neural_network"]["k_grid"]
+
+        exp_data_path = self.config["experiment"]["dataset_dir"]
+        pt_data  = read_ascii(exp_data_path)
+        interpolated_chi_k = interpolate_spectrum(pt_data.k, pt_data.chi, k_grid)
+        interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+        xftf(pt_data, kweight=0, kmin=kmin, kmax=kmax)
+        xftr(pt_data, rmin=1.7, rmax=3.2)
+        interpolated_chi_q = interpolate_spectrum(pt_data.q, pt_data.chiq_re, k_grid)
+
+        self.predict_and_denormalize(interpolated_chi_k)
+
+        predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+
+        # path_predicted = feffpath(self.feff_path_file)
+        # path_predicted.s02 = 1
+        # path_predicted.degen = predicted_a
+        # path_predicted.deltar = predicted_deltar
+        # path_predicted.sigma2 = predicted_sigma2
+        # path_predicted.e0 = predicted_e0
+        # path2chi(path_predicted)
+        # xftf(path_predicted, kweight=2, kmin=kmin, kmax=kmax)
+        # xftr(path_predicted, rmin=1.7, rmax=3.2)
+
+        # interpolated_predicted = interpolate_spectrum(path_predicted.q, path_predicted.chiq_re, k_grid)
+
+
+        # path_artemis = feffpath(self.feff_path_file)
+        # path_artemis.s02 = 1
+        # path_artemis.degen = 9.276
+        # path_artemis.deltar = -0.007
+        # path_artemis.sigma2 = 0.00417
+        # path_artemis.e0 = 9.022
+        # path2chi(path_artemis)
+        # xftf(path_artemis, kweight=2, kmin=kmin, kmax=kmax)
+        # xftr(path_artemis, rmin=1.7, rmax=3.2)
+
+        # interpolated_artemis = interpolate_spectrum(path_artemis.q, path_artemis.chiq_re, k_grid)
+
+        return print(f"{predicted_a=}, {predicted_deltar=}, {predicted_sigma2=}, {predicted_e0=}")
 
 
     # def fit_laplace(self):
