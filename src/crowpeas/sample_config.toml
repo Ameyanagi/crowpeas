@@ -55,3 +55,20 @@ activation = "gelu"
 output_activation = "linear"
 output_dim = 4
 hidden_dims = [1024, 516, 516, 516, 516]
+
+# Required in experiment mode.
+# Provide data in chi(k)
+[experimnetal_data.raw]
+# filepaths
+data_1 = ""
+
+# For preprocessing experimental data
+[experimental_data.process]
+k_range = [2.5, 12.5]
+k_weight = 2
+r_range = [1.7, 3.2]
+
+# Artemis results
+[experimental_data.artemis]
+data_1_artemis_result = np.array([9.6, -0.002, 0.0037, -1.8])
+data_1_artemis_unc = np.array([0.7, 0.003, 0.0003, 0.6])

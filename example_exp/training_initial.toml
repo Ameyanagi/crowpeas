@@ -1,0 +1,59 @@
+[general]
+title = "Rh training"
+mode = "training"
+
+[training]
+feffpath = "feff/Rh_feff0001.dat"
+training_set_dir = "training_set"
+training_data_prefix = "Rh training_training_data"
+num_examples = 30000
+spectrum_noise = true
+noise_range = [ 0.0, 0.01,]
+k_range = [ 2, 14,]
+k_weight = 2
+train_size_ratio = 0.8
+val_size_ratio = 0.1
+test_size_ratio = 0.1
+r_range = [1.3, 3.0]
+
+[neural_network]
+model_name = "Rh"
+model_dir = "model"
+checkpoint_dir = "checkpoint"
+checkpoint_name = "Rh"
+
+[training.param_ranges]
+s02 = [ 0.75, 1.2,]
+degen = [ 4.0, 13.0,]
+deltar = [ -0.2, 0.2,]
+sigma2 = [ 0.001, 0.02,]
+e0 = [ -10, 10,]
+
+[neural_network.hyperparameters]
+epochs = 1000
+batch_size = 8000
+learning_rate = 0.001
+
+[neural_network.architecture]
+type = "BNN"
+activation = "relu"
+output_activation = "linear"
+output_dim = 4
+hidden_dims = [ 516, 516, 516, 516,]
+
+# Required in experiment mode.
+[experiment]
+# Provide data in .chik format
+# filepaths
+dataset_dir = "/home/nick/Projects/crowpeas/example_exp/exp_data/"
+
+# For preprocessing experimental data
+
+k_range = [2, 14,]
+k_weight = 2
+r_range = [1.3, 3.0]
+
+# Artemis results
+[artemis]
+result = [9.6, -0.002, 0.0037, -1.8]
+unc = [0.7, 0.003, 0.0003, 0.6]
