@@ -75,9 +75,13 @@ def denormalize_data(normalized_data: np.ndarray, norm_params: dict) -> np.ndarr
         np.ndarray: Denormalized data.
     """
     min_val = norm_params["min"]
+    min_val = np.array(min_val)
     max_val = norm_params["max"]
+    max_val = np.array(max_val)
     feature_min = norm_params["feature_min"]
+    feature_min = np.array(feature_min)
     feaure_max = norm_params["feature_max"]
+    feaure_max = np.array(feaure_max)
     scale = feaure_max - feature_min
     denormalized_data = ((normalized_data - feature_min) / scale) * (
         max_val - min_val
@@ -127,6 +131,29 @@ def predict_and_denormalize(
     prediction = prediction.cpu().numpy().squeeze(0)
 
     return denormalize_data(prediction, norm_params)
+
+
+def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict, n_samples: int=100):
+    device = model.device
+    input_data = input_data.to(device)
+
+    # Perform multiple forward passes
+    predictions = torch.zeros((n_samples, 4)).to(device)
+
+    with torch.no_grad():
+        for i in range(n_samples):
+            predictions[i] = model(input_data)
+
+    # Calculate mean and standard deviation across the samples
+    denormalized_predictions = np.zeros_like(predictions.cpu().numpy())
+    for i, pred in enumerate(predictions):
+        denormalized_predictions[i] = denormalize_data(pred.cpu().numpy(), norm_params)
+
+    mean_predictions = np.mean(denormalized_predictions, axis=0)
+    uncertainty = np.std(denormalized_predictions, axis=0)
+
+    return mean_predictions, uncertainty
+
 
 
 # TODO: refactor

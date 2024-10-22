@@ -63,7 +63,7 @@ def main(
         typer.Option(
             "--experiment",
             "-e",
-            help="",
+            help="Option to use a trained model to make predictions on experimnetal data. True: predict on experimental data, False(default): Do not predict on experimental data",
         ),
     ] = False,
 ):
@@ -131,6 +131,8 @@ def run_crowpeas(
         cp.init_synthetic_spectra(generate=True)
         cp.save_training_data()
         cp.save_config()
+    if experiment:
+        pass
     else:
         console.print("Trying to load dataset, if exists")
         cp.load_synthetic_spectra()
@@ -157,7 +159,10 @@ def run_crowpeas(
         cp.plot_test_spectra(1, save_path="./1.png")
 
     if experiment:
-        pass
+        console.print("Looking for experimental config file")
+        cp.predict_on_experimental_data()
+        
+        
 
     return
 

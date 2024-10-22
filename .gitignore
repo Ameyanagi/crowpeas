@@ -114,5 +114,6 @@ examples/checkpoint/
 lightning_logs/
 notebook/
 
-
-
+example_exp/training_set/
+example_exp/training_data/
+example_exp/checkpoint/

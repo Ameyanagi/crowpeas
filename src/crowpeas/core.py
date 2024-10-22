@@ -20,9 +20,14 @@ from .utils import (
     normalize_spectra,
     denormalize_spectra,
     interpolate_spectrum,
+    predict_with_uncertainty
 )
-from larch.xafs import xftf, xftr, feffpath, path2chi
+from larch.xafs import xftf, xftr, feffpath, path2chi, ftwindow
+from larch.io import read_ascii
+from larch.fitting import param, guess, param_group
+from larch import Group 
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 # from laplace import Laplace, marglik_training
 # from copy import deepcopy
@@ -34,6 +39,9 @@ class CrowPeas:
     config_filename: str
     config_dir: str
     config: dict
+    exp_config_filename: str
+    exp_config_dir: str
+    exp_config: dict
     norm_params_spectra: dict
     norm_params_parameters: dict
 
@@ -144,6 +152,17 @@ class CrowPeas:
             "output_dim",
             "hidden_dims",
         ]
+        required_for_expertiment = [
+            "dataset_dir",
+            "k_range",
+            "r_range",
+            "k_weight",
+        ]
+        required_for_artemis = [
+            "result",
+            "unc",
+
+        ]
 
         for section in required_sections:
             if section not in self.config:
@@ -203,6 +222,24 @@ class CrowPeas:
                 raise ValueError(
                     f"Parameter {param} is missing in architecture section of config file"
                 )
+
+        if "experiment" in self.config:
+            print("Experiment section found")
+            for param in required_for_expertiment:
+                if param not in self.config["experiment"]:
+                    raise ValueError(
+                        f"Parameter {param} is missing in experiment section of config file"
+                    )
+        
+        if "artemis" in self.config:
+            print("Artemis section found")
+            for param in required_for_artemis:
+                if param not in self.config["artemis"]:
+                    raise ValueError(
+                        f"Parameter {param} is missing in artemis section of config file"
+                    )
+
+            
 
         self.title = self.config["general"]["title"]
         self.norm_params_spectra = self.config["general"].get(
@@ -275,6 +312,7 @@ class CrowPeas:
             self.val_size_ratio = self.config["training"].get("val_size_ratio", 0.1)
             self.test_size_ratio = self.config["training"].get("test_size_ratio", 0.1)
 
+
         self.epochs = self.config["neural_network"]["hyperparameters"]["epochs"]
         self.batch_size = self.config["neural_network"]["hyperparameters"]["batch_size"]
         self.learning_rate = self.config["neural_network"]["hyperparameters"][
@@ -318,7 +356,9 @@ class CrowPeas:
         return self
 
     def save_config(self, path: str | None = None):
-        self.config = {
+        
+        if "experiment" in self.config and "artemis" not in self.config:
+            self.config = {
             "general": {
                 "title": self.title,
                 "mode": "training" if self.training_mode else "inference",
@@ -364,7 +404,126 @@ class CrowPeas:
                 },
                 "k_grid": self.nn_k_grid,
             },
-        }
+            "experiment": {
+                "dataset_dir": self.config["experiment"]["dataset_dir"],
+                "k_range": self.config["experiment"]["k_range"],
+                "r_range": self.config["experiment"]["r_range"],
+                "k_weight": self.config["experiment"]["k_weight"],
+            },
+            
+            
+                }
+        if "experiment" in self.config and "artemis" in self.config:
+            self.config = {
+            "general": {
+                "title": self.title,
+                "mode": "training" if self.training_mode else "inference",
+                "seed": self.seed,
+                "norm_params_spectra": self.norm_params_spectra,
+                "norm_params_parameters": self.norm_params_parameters,
+            },
+            "training": (
+                {
+                    "feffpath": os.path.relpath(self.feff_path_file, self.config_dir),
+                    "training_set_dir": os.path.relpath(
+                        self.training_set_dir, self.config_dir
+                    ),
+                    "training_data_prefix": self.training_data_prefix,
+                    "num_examples": self.num_examples,
+                    "spectrum_noise": self.spectrum_noise,
+                    "noise_range": self.noise_range,
+                    "k_range": self.k_range,
+                    "k_weight": self.k_weight,
+                    "r_range": self.r_range,
+                    "train_size_ratio": self.train_size_ratio,
+                    "val_size_ratio": self.val_size_ratio,
+                    "test_size_ratio": self.test_size_ratio,
+                    "param_ranges": self.param_ranges,
+                }
+            ),
+            "neural_network": {
+                "model_name": self.model_name,
+                "model_dir": os.path.relpath(self.model_dir, self.config_dir),
+                "checkpoint_dir": os.path.relpath(self.checkpoint_dir, self.config_dir),
+                "checkpoint_name": self.checkpoint_name,
+                "hyperparameters": {
+                    "epochs": self.epochs,
+                    "batch_size": self.batch_size,
+                    "learning_rate": self.learning_rate,
+                },
+                "architecture": {
+                    "type": self.nn_type,
+                    "activation": self.nn_activation,
+                    "output_activation": self.nn_output_activation,
+                    "output_dim": self.nn_output_dim,
+                    "hidden_dims": self.nn_hidden_dims,
+                },
+                "k_grid": self.nn_k_grid,
+            },
+            "experiment": {
+                "dataset_dir": self.config["experiment"]["dataset_dir"],
+                "k_range": self.config["experiment"]["k_range"],
+                "r_range": self.config["experiment"]["r_range"],
+                "k_weight": self.config["experiment"]["k_weight"],
+            },
+            "artemis": {
+                "result": self.config["artemis"]["result"],
+                "unc": self.config["artemis"]["unc"],
+
+            },
+            
+            
+                }
+        else:
+
+            self.config = {
+                "general": {
+                    "title": self.title,
+                    "mode": "training" if self.training_mode else "inference",
+                    "seed": self.seed,
+                    "norm_params_spectra": self.norm_params_spectra,
+                    "norm_params_parameters": self.norm_params_parameters,
+                },
+                "training": (
+                    {
+                        "feffpath": os.path.relpath(self.feff_path_file, self.config_dir),
+                        "training_set_dir": os.path.relpath(
+                            self.training_set_dir, self.config_dir
+                        ),
+                        "training_data_prefix": self.training_data_prefix,
+                        "num_examples": self.num_examples,
+                        "spectrum_noise": self.spectrum_noise,
+                        "noise_range": self.noise_range,
+                        "k_range": self.k_range,
+                        "k_weight": self.k_weight,
+                        "r_range": self.r_range,
+                        "train_size_ratio": self.train_size_ratio,
+                        "val_size_ratio": self.val_size_ratio,
+                        "test_size_ratio": self.test_size_ratio,
+                        "param_ranges": self.param_ranges,
+                    }
+                ),
+                "neural_network": {
+                    "model_name": self.model_name,
+                    "model_dir": os.path.relpath(self.model_dir, self.config_dir),
+                    "checkpoint_dir": os.path.relpath(self.checkpoint_dir, self.config_dir),
+                    "checkpoint_name": self.checkpoint_name,
+                    "hyperparameters": {
+                        "epochs": self.epochs,
+                        "batch_size": self.batch_size,
+                        "learning_rate": self.learning_rate,
+                    },
+                    "architecture": {
+                        "type": self.nn_type,
+                        "activation": self.nn_activation,
+                        "output_activation": self.nn_output_activation,
+                        "output_dim": self.nn_output_dim,
+                        "hidden_dims": self.nn_hidden_dims,
+                    },
+                    "k_grid": self.nn_k_grid,
+                },
+                
+            }
 
         if path is not None:
             if path.endswith("toml"):
@@ -606,6 +765,25 @@ class CrowPeas:
 
         return self
 
+    def predict_and_denormalize_BNN(self, spectrum: torch.Tensor):
+        if not hasattr(self, "model") or self.model is None:
+            self.load_model()
+
+        if not hasattr(self, "norm_params_spectra") or self.norm_params_spectra is None:
+            raise ValueError("Normalization parameters are not available")
+
+        if (
+            not hasattr(self, "norm_params_parameters")
+            or self.norm_params_parameters is None
+        ):
+            raise ValueError("Normalization parameters are not available")
+
+        self.model.eval()
+
+        self.denormalized_test_pred = predict_with_uncertainty(self.model, spectrum, self.norm_params_parameters, n_samples=100)
+
+        return self
+
     def denormalize_data(self, data: torch.Tensor | np.ndarray):
 
         if not hasattr(self, "norm_params_spectra") or self.norm_params_spectra is None:
@@ -785,6 +963,171 @@ class CrowPeas:
             fig.savefig(save_path)
 
         return fig
+
+    def predict_on_experimental_data(self):
+
+        krange = self.config["experiment"]["k_range"]
+        kmin = krange[0]
+        kmax = krange[1]
+        r_range = self.config["experiment"]["r_range"]
+        rmin = r_range[0]
+        rmax = r_range[1]
+
+        k_grid = self.config["neural_network"]["k_grid"] # this is actually a list of strings #TODO: make sure this is not an issue elsewhere in the code
+        k_grid = np.array(k_grid, dtype=np.float32)
+        k_weight = self.config["experiment"]["k_weight"]
+
+        exp_data_path = self.config["experiment"]["dataset_dir"]
+        pt_data  = read_ascii(exp_data_path)
+
+        if k_weight == 2:
+            pt_data.chi2 = pt_data.chi*pt_data.k**2
+
+        interpolated_chi_k = interpolate_spectrum(pt_data.k, pt_data.chi2, k_grid)
+        interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+        xftf(pt_data, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(pt_data, rmin=rmin, rmax=rmax)
+        interpolated_chi_q = interpolate_spectrum(pt_data.q, pt_data.chiq_re, k_grid)
+
+
+
+        self.predict_and_denormalize_BNN(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
+        #self.predict_and_denormalize(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
+        preds, uncs = self.denormalized_test_pred
+        #predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+        predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds
+        a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
+
+        path_predicted = feffpath(self.feff_path_file)
+        path_predicted.s02 = 1
+        path_predicted.degen = predicted_a
+        path_predicted.deltar = predicted_deltar
+        path_predicted.sigma2 = predicted_sigma2
+        path_predicted.e0 = predicted_e0
+        path2chi(path_predicted)
+        xftf(path_predicted, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(path_predicted, rmin=rmin, rmax=rmax)
+
+        interpolated_predicted = interpolate_spectrum(path_predicted.q, path_predicted.chiq_re, k_grid)
+
+        artemis_results = self.config["artemis"]["result"]
+        artemis_unc = self.config["artemis"]["unc"]
+
+        artemis_a = self.config["artemis"]["result"][0]
+        artemis_deltar = self.config["artemis"]["result"][1]
+        artemis_sigma2 = self.config["artemis"]["result"][2]
+        artemis_e0 = self.config["artemis"]["result"][3]
+    
+
+        path_artemis = feffpath(self.feff_path_file)
+        path_artemis.s02 = 1
+        path_artemis.degen = artemis_a
+        path_artemis.deltar = artemis_deltar
+        path_artemis.sigma2 = artemis_sigma2
+        path_artemis.e0 = artemis_e0
+        path2chi(path_artemis)
+        xftf(path_artemis, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(path_artemis, rmin=rmin, rmax=rmax)
+
+        interpolated_artemis = interpolate_spectrum(path_artemis.q, path_artemis.chiq_re, k_grid)
+
+        self.exp_prediction = {
+            "predicted_a": predicted_a,
+            "predicted_deltar": predicted_deltar,
+            "predicted_sigma2": predicted_sigma2,
+            "predicted_e0": predicted_e0,
+            "interpolated_chi_k": interpolated_chi_k,
+            "interpolated_chi_q": interpolated_chi_q,
+            "interpolated_predicted": interpolated_predicted,
+            "interpolated_artemis": interpolated_artemis
+        }
+
+        def get_MSE_error(interpolated_artemis, interpolated_exp, k_grid, krange):
+            
+            kmin = krange[0]
+            kmax = krange[1]
+
+            # get exp in range
+            interpolated_exp_in_range = [i[1] for i in zip(k_grid, interpolated_exp) if kmin <= i[0] <= kmax]
+            interpolated_exp_in_range = np.array(interpolated_exp_in_range)
+
+            # MSE error between predicted and artemis with nano
+            interpolated_artemis_in_range = [i[1] for i in zip(k_grid, interpolated_artemis) if kmin <= i[0] <= kmax]
+            interpolated_artemis_in_range = np.array(interpolated_artemis_in_range)
+
+            e2 = np.mean((interpolated_artemis_in_range - interpolated_exp_in_range)**2)
+
+            return e2
+        
+        mse_artemis = get_MSE_error(interpolated_artemis, interpolated_chi_q, k_grid, krange)
+        
+        # Define the overall figure
+        fig = plt.figure(figsize=(10, 5))
+
+        # Create a grid with 2 rows and 3 columns, with the last column being used for the single plot
+        gs = gridspec.GridSpec(2, 3, width_ratios=[1, 1, 2])
+
+        # First 2x2 grid for the subplots 1-4
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax2 = fig.add_subplot(gs[0, 1])
+        ax3 = fig.add_subplot(gs[1, 0])
+        ax4 = fig.add_subplot(gs[1, 1])
+
+        # The fifth plot occupying the third column
+        ax5 = fig.add_subplot(gs[:, 2])
+
+        # Plot the first four subplots in a 2x2 grid
+        ax1.errorbar(predicted_a, artemis_results[0], xerr=a_unc, yerr=artemis_unc[0], fmt='o', label='Predicted', color='red')
+        ax1.plot([8, 10], [8, 10], 'r--')
+        #ax1.set_xlim(8, 10)
+        #ax1.set_ylim(8, 10)
+        ax1.set_title('A')
+        ax1.set_xlabel('NN')
+        ax1.set_ylabel('Artemis')
+        # change tick font size
+        ax1.tick_params(axis='both', which='major', labelsize=8)
+
+
+        ax2.errorbar(predicted_deltar, artemis_results[1], xerr=deltar_unc, yerr=artemis_unc[1], fmt='o', label='Predicted', color='red')
+        ax2.plot([-0.02, 0], [-0.02, 0], 'r--')
+        #ax2.set_xlim(-0.02, 0)
+        #ax2.set_ylim(-0.02, 0)
+        ax2.set_title('Delta R')
+        ax2.set_xlabel('NN')
+        ax2.set_ylabel('Artemis')
+        ax2.tick_params(axis='both', which='major', labelsize=8)
+
+        ax3.errorbar(predicted_sigma2, artemis_results[2], xerr=sigma2_unc, yerr=artemis_unc[2], fmt='o', label='Predicted', color='red')
+        ax3.plot([0.003, 0.005], [0.003, 0.005], 'r--')
+        #ax3.set_xlim(0.003, 0.005)
+        #ax3.set_ylim(0.003, 0.005)
+        ax3.set_title('Sigma2')
+        ax3.set_xlabel('NN')
+        ax3.set_ylabel('Artemis')
+        ax3.tick_params(axis='both', which='major', labelsize=8)
+
+        ax4.errorbar(predicted_e0, artemis_results[3], xerr=e0_unc, yerr=artemis_unc[3], fmt='o', label='Predicted', color='red')
+        ax4.plot([-10, 10], [-10, 10], 'r--')
+        #ax4.set_xlim(-10, 10)
+        #ax4.set_ylim(-10, 10)
+        ax4.set_title('enot')
+        ax4.set_xlabel('NN')
+        ax4.set_ylabel('Artemis')
+        ax4.tick_params(axis='both', which='major', labelsize=8)
+
+        # Plot the fifth subplot
+        ax5.plot(k_grid, interpolated_chi_q, label='Experimental', color='black')
+        ax5.plot(k_grid, interpolated_artemis, label=f'Artemis MSE = {mse_artemis:.3f}', color='blue')
+        ax5.set_xlim(2, 14)
+        ax5.set_title('Q-space')
+        ax5.legend()
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.savefig('exp_agreement.png')
+
+        return print(f"{predicted_a=}, {predicted_deltar=}, {predicted_sigma2=}, {predicted_e0=}")
+
 
     # def fit_laplace(self):
     #     if not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None:
