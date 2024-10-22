@@ -66,11 +66,26 @@ def main(
             help="Option to use a trained model to make predictions on experimnetal data. True: predict on experimental data, False(default): Do not predict on experimental data",
         ),
     ] = False,
+
+    plot: Annotated[
+        bool,
+        typer.Option(
+            "--plot",
+            "-p",
+            help="Option to plot experimental data. True: plot experimental data, False(default): Do not plot experimental data",
+        ),
+    ] = False,
+
+    data_path: Annotated[
+        str | None, typer.Option("--data-path", help="Data path required when using --plot option")
+    ] = None,
 ):
     """
     Crowpeas is a tool to perform a neural network based EXAFS analysis.
     This cli will provide a training, prediction and evaluation interface.
     """
+    if plot and not data_path:
+        raise typer.BadParameter("Ploting requires data path!")
 
     if generate:
         if config is None:
@@ -91,9 +106,12 @@ def main(
         run_crowpeas(config, training, dataset, resume, validate, experiment)
         return
 
-    if config is None:
+    if config is None and not plot:
         typer.echo(app.rich_help_panel)
         # console.print(app.rich_help_panel)
+
+    if plot:
+        plot_crowpeas(data_path)
 
 
 def generate_config(config: str):
@@ -166,6 +184,18 @@ def run_crowpeas(
 
     return
 
+def plot_crowpeas(
+    dataset_dir: str | None,
+):
+    from crowpeas.core import CrowPeas
+
+    console.print(f"Plotting {dataset_dir} with crowpeas")
+
+    cp = CrowPeas()
+    console.print("Chi k2")
+    cp.plot_chi(dataset_dir)
+    console.print("R")
+    cp.plot_r(dataset_dir)
 
 if __name__ == "__main__":
     app()

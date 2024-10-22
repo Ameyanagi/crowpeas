@@ -75,13 +75,13 @@ def denormalize_data(normalized_data: np.ndarray, norm_params: dict) -> np.ndarr
         np.ndarray: Denormalized data.
     """
     min_val = norm_params["min"]
-    min_val = np.array(min_val)
+    min_val = np.array(min_val).astype(np.float32)
     max_val = norm_params["max"]
-    max_val = np.array(max_val)
+    max_val = np.array(max_val).astype(np.float32)
     feature_min = norm_params["feature_min"]
-    feature_min = np.array(feature_min)
+    feature_min = np.array(feature_min).astype(np.float32)
     feaure_max = norm_params["feature_max"]
-    feaure_max = np.array(feaure_max)
+    feaure_max = np.array(feaure_max).astype(np.float32)
     scale = feaure_max - feature_min
     denormalized_data = ((normalized_data - feature_min) / scale) * (
         max_val - min_val

@@ -966,6 +966,7 @@ class CrowPeas:
 
     def predict_on_experimental_data(self):
 
+        network_type = self.config["neural_network"]["architecture"]["type"]
         krange = self.config["experiment"]["k_range"]
         kmin = krange[0]
         kmax = krange[1]
@@ -990,6 +991,8 @@ class CrowPeas:
         interpolated_chi_q = interpolate_spectrum(pt_data.q, pt_data.chiq_re, k_grid)
 
 
+        artemis_results = self.config["artemis"]["result"]
+        artemis_unc = self.config["artemis"]["unc"]
 
         self.predict_and_denormalize_BNN(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
         #self.predict_and_denormalize(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
@@ -1127,6 +1130,46 @@ class CrowPeas:
         plt.savefig('exp_agreement.png')
 
         return print(f"{predicted_a=}, {predicted_deltar=}, {predicted_sigma2=}, {predicted_e0=}")
+
+
+
+
+    def plot_chi(self, dataset_dir):
+        data = read_ascii(dataset_dir)
+
+        k_weight = 2
+
+        if k_weight == 2:
+            data.chi2 = data.chi * data.k ** 2
+
+        plt_t.plot(data.k, data.chi2, label='Chi2')
+        plt_t.xlabel('k')
+        plt_t.xfrequency(20)
+        plt_t.ylabel('Chi2')
+        plt_t.title(f'{dataset_dir}')
+        plt_t.show()
+    
+    def plot_r(self, dataset_dir):
+        data = read_ascii(dataset_dir)
+
+        k_weight = 2
+        kmin = 2
+        kmax = 14
+
+        plt_t.clear_figure()
+
+        if k_weight == 2:
+            data.chi2 = data.chi * data.k ** 2
+        xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
+
+        plt_t.plot(data.r, data.chir_mag, label='FT-EXAFS')
+        plt_t.xlabel('r')
+        plt_t.xfrequency(12)
+        plt_t.ylabel('chir_mag')
+        plt_t.title(f'{dataset_dir}')
+        plt_t.show()
+
+
 
 
     # def fit_laplace(self):
