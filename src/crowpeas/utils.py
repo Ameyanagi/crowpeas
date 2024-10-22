@@ -133,6 +133,29 @@ def predict_and_denormalize(
     return denormalize_data(prediction, norm_params)
 
 
+def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict, n_samples: int=100):
+    device = model.device
+    input_data = input_data.to(device)
+
+    # Perform multiple forward passes
+    predictions = torch.zeros((n_samples, 4)).to(device)
+
+    with torch.no_grad():
+        for i in range(n_samples):
+            predictions[i] = model(input_data)
+
+    # Calculate mean and standard deviation across the samples
+    denormalized_predictions = np.zeros_like(predictions.cpu().numpy())
+    for i, pred in enumerate(predictions):
+        denormalized_predictions[i] = denormalize_data(pred.cpu().numpy(), norm_params)
+
+    mean_predictions = np.mean(denormalized_predictions, axis=0)
+    uncertainty = np.std(denormalized_predictions, axis=0)
+
+    return mean_predictions, uncertainty
+
+
+
 # TODO: refactor
 def plot_MSE_error_in_krange(
     k_grid,
