@@ -10,6 +10,7 @@ from .data_loader import CrowPeasDataModule
 import lightning as pl
 from .model.BNN import BNN
 from .model.MLP import MLP
+from .model.CNN import CNN
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
@@ -48,7 +49,7 @@ class CrowPeas:
     model: pl.LightningModule
 
     # parameters related to neural network architecture
-    nn_type: Literal["MLP", "BNN"]
+    nn_type: Literal["MLP", "BNN", "CNN"]
     nn_activation: str
     nn_output_activation: str
     nn_output_dim: int
@@ -500,6 +501,10 @@ class CrowPeas:
             self.model = MLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
+        elif self.nn_type.lower().startswith("cnn"):
+            self.model = CNN.load_from_checkpoint(
+                os.path.join(self.checkpoint_dir, self.checkpoint_name)
+            )
 
         return self
 
@@ -520,6 +525,20 @@ class CrowPeas:
             )
         elif self.nn_type.lower().startswith("mlp"):
             self.model = MLP(
+                hidden_layers=self.nn_hidden_dims,
+                output_size=self.nn_output_dim,
+                k_min=self.k_range[0],
+                k_max=self.k_range[1],
+                r_min=self.r_range[0],
+                r_max=self.r_range[1],
+                rmax_out=6,
+                window="kaiser",
+                dx=1,
+                input_form="r",
+                activation=self.nn_activation,
+            )
+        elif self.nn_type.lower().startswith("cnn"):
+            self.model = CNN(
                 hidden_layers=self.nn_hidden_dims,
                 output_size=self.nn_output_dim,
                 k_min=self.k_range[0],
