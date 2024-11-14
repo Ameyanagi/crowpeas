@@ -238,8 +238,19 @@ class CrowPeas:
                     raise ValueError(
                         f"Parameter {param} is missing in artemis section of config file"
                     )
+        # Convert numeric strings to floats in norm_params_spectra
+        norm_params_spectra = self.config.get('general', {}).get('norm_params_spectra', {})
+        self.config['general']['norm_params_spectra'] = {
+            key: float(value) for key, value in norm_params_spectra.items()
+        }
 
-            
+        # Repeat the process for norm_params_parameters
+        norm_params_parameters = self.config.get('general', {}).get('norm_params_parameters')
+        if isinstance(norm_params_parameters, list):
+            self.config['general']['norm_params_parameters'] = np.array(norm_params_parameters)
+        elif isinstance(norm_params_parameters, dict):
+            self.config['general']['norm_params_parameters'] = norm_params_parameters
+    
 
         self.title = self.config["general"]["title"]
         self.norm_params_spectra = self.config["general"].get(
@@ -356,7 +367,16 @@ class CrowPeas:
         return self
 
     def save_config(self, path: str | None = None):
-        
+
+        # Process norm_params_parameters
+        norm_params_parameters = self.config["general"].get('norm_params_parameters')
+        if isinstance(norm_params_parameters, dict):
+            for key, value in norm_params_parameters.items():
+                if isinstance(value, np.ndarray):
+                    norm_params_parameters[key] = value.tolist()
+        elif isinstance(norm_params_parameters, np.ndarray):
+            self.config["general"]['norm_params_parameters'] = norm_params_parameters.tolist()
+
         if "experiment" in self.config and "artemis" not in self.config:
             self.config = {
             "general": {
@@ -994,12 +1014,17 @@ class CrowPeas:
         artemis_results = self.config["artemis"]["result"]
         artemis_unc = self.config["artemis"]["unc"]
 
-        self.predict_and_denormalize_BNN(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
-        #self.predict_and_denormalize(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
-        preds, uncs = self.denormalized_test_pred
-        #predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
-        predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds
-        a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
+        if network_type == "BNN":
+            self.predict_and_denormalize_BNN(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
+            preds, uncs = self.denormalized_test_pred
+            predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds
+            a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
+
+        if network_type == "MLP":
+            self.predict_and_denormalize(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
+            predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+            a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
+
 
         path_predicted = feffpath(self.feff_path_file)
         path_predicted.s02 = 1
