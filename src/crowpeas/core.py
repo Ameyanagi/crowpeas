@@ -29,6 +29,8 @@ from larch import Group
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+import plotext as plt_t
+
 # from laplace import Laplace, marglik_training
 # from copy import deepcopy
 
