@@ -1108,7 +1108,7 @@ class CrowPeas:
 
         # Plot the first four subplots in a 2x2 grid
         ax1.errorbar(predicted_a, artemis_results[0], xerr=a_unc, yerr=artemis_unc[0], fmt='o', label='Predicted', color='red')
-        ax1.plot([8, 10], [8, 10], 'r--')
+        ax1.plot([artemis_results[0]-2, artemis_results[0]+2], [artemis_results[0]-2, artemis_results[0]+2], 'r--')
         #ax1.set_xlim(8, 10)
         #ax1.set_ylim(8, 10)
         ax1.set_title('A')
@@ -1119,7 +1119,7 @@ class CrowPeas:
 
 
         ax2.errorbar(predicted_deltar, artemis_results[1], xerr=deltar_unc, yerr=artemis_unc[1], fmt='o', label='Predicted', color='red')
-        ax2.plot([-0.02, 0], [-0.02, 0], 'r--')
+        ax2.plot([artemis_results[1]-0.1, artemis_results[1]+0.1], [artemis_results[1]-0.1, artemis_results[1]+0.1], 'r--')
         #ax2.set_xlim(-0.02, 0)
         #ax2.set_ylim(-0.02, 0)
         ax2.set_title('Delta R')
@@ -1128,7 +1128,7 @@ class CrowPeas:
         ax2.tick_params(axis='both', which='major', labelsize=8)
 
         ax3.errorbar(predicted_sigma2, artemis_results[2], xerr=sigma2_unc, yerr=artemis_unc[2], fmt='o', label='Predicted', color='red')
-        ax3.plot([0.003, 0.005], [0.003, 0.005], 'r--')
+        ax3.plot([artemis_results[2]-0.02, artemis_results[2]+0.02], [artemis_results[2]-0.02, artemis_results[2]+0.02], 'r--')
         #ax3.set_xlim(0.003, 0.005)
         #ax3.set_ylim(0.003, 0.005)
         ax3.set_title('Sigma2')
