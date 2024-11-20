@@ -2,6 +2,7 @@
 
 import toml
 import os
+import math
 from typing import Sequence, Literal
 import json
 
@@ -253,6 +254,25 @@ class CrowPeas:
         elif isinstance(norm_params_parameters, dict):
             self.config['general']['norm_params_parameters'] = norm_params_parameters
     
+        # Ensure experiment[dataset_dir] is a list of strings
+        dataset_dirs = self.config.get('experiment', {}).get('dataset_dir', [])
+        if isinstance(dataset_dirs, list):
+            self.config['experiment']['dataset_dir'] = [str(dir) for dir in dataset_dirs]
+
+        # Convert artemis[result] and artemis[unc] to lists of lists of floats
+        artemis_results = self.config.get('artemis', {}).get('result', [])
+        if isinstance(artemis_results, list):
+            self.config['artemis']['result'] = [
+                [float(item) for item in sublist] if isinstance(sublist, list) else [float(sublist)]
+                for sublist in artemis_results
+            ]
+
+        artemis_unc = self.config.get('artemis', {}).get('unc', [])
+        if isinstance(artemis_unc, list):
+            self.config['artemis']['unc'] = [
+                [float(item) for item in sublist] if isinstance(sublist, list) else [float(sublist)]
+                for sublist in artemis_unc
+            ]
 
         self.title = self.config["general"]["title"]
         self.norm_params_spectra = self.config["general"].get(
@@ -985,6 +1005,323 @@ class CrowPeas:
             fig.savefig(save_path)
 
         return fig
+
+    def load_exp_data(self, dataset_dir: str):
+        data = read_ascii(dataset_dir)
+        return data
+
+    def process_exp_data(self, data):
+        k_weight = self.k_weight
+        kmin = self.k_range[0]
+        kmax = self.k_range[1]
+        rmin = self.r_range[0]
+        rmax = self.r_range[1]
+        k_grid = self.config["neural_network"]["k_grid"] # this is actually a list of strings #TODO: make sure this is not an issue elsewhere in the code
+        k_grid = np.array(k_grid, dtype=np.float32)
+        k_weight = self.config["experiment"]["k_weight"]
+
+        xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(data, rmin=rmin, rmax=rmax)
+
+        if k_weight == 2:
+            data.chi2 = data.chi * data.k ** 2
+        
+        interpolated_chi_k = interpolate_spectrum(data.k, data.chi2, k_grid)
+        interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+        xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(data, rmin=rmin, rmax=rmax)
+        interpolated_chi_q = interpolate_spectrum(data.q, data.chiq_re, k_grid)
+
+        return interpolated_chi_k, interpolated_chi_q
+
+    def run_predictions(self):
+        network_type = self.config["neural_network"]["architecture"]["type"]
+        dataset_dirs = self.config['experiment']['dataset_dir']
+        artemis_results = self.config['artemis']['result']
+        artemis_unc = self.config['artemis']['unc']
+
+        predictions = []
+
+        for i in range(len(dataset_dirs)):
+            dataset_dir = dataset_dirs[i]
+            artemis_result = artemis_results[i]
+            artemis_unc_entry = artemis_unc[i]
+
+            # Load and preprocess data for the current dataset_dir
+            interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir))
+            interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+
+            # Normalize the data
+            max_abs_val = self.norm_params_spectra["max_abs_val"]
+            normalized_chi_k = interpolated_chi_k / max_abs_val
+
+            # Perform prediction
+            if network_type == "BNN":
+                self.predict_and_denormalize_BNN(normalized_chi_k[0])
+                preds, uncs = self.denormalized_test_pred
+                predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds
+                a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
+
+            if network_type == "MLP":
+                self.predict_and_denormalize(normalized_chi_k[0])
+                predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+                a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
+
+            predictions.append({
+                'predicted_a': predicted_a,
+                'predicted_deltar': predicted_deltar,
+                'predicted_sigma2': predicted_sigma2,
+                'predicted_e0': predicted_e0,
+                'uncertainty_a': a_unc,
+                'uncertainty_deltar': deltar_unc,
+                'uncertainty_sigma2': sigma2_unc,
+                'uncertainty_e0': e0_unc,
+                'interpolated_chi_k': interpolated_chi_k,
+                'interpolated_chi_q': interpolated_chi_q,
+                'artemis_result': artemis_result,
+                'artemis_unc': artemis_unc_entry
+            })
+
+        return predictions
+
+    def build_synth_spectra(self, predicted_params: list | np.ndarray):
+
+        kmin = self.k_range[0]
+        kmax = self.k_range[1]
+        rmin = self.r_range[0]
+        rmax = self.r_range[1]
+        k_grid = self.config["neural_network"]["k_grid"] # this is actually a list of strings #TODO: make sure this is not an issue elsewhere in the code
+        k_grid = np.array(k_grid, dtype=np.float32)
+        k_weight = self.config["experiment"]["k_weight"]
+
+        predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = predicted_params
+
+
+        
+        path_predicted = feffpath(self.feff_path_file)
+        path_predicted.s02 = 1
+        path_predicted.degen = predicted_a
+        path_predicted.deltar = predicted_deltar
+        path_predicted.sigma2 = predicted_sigma2
+        path_predicted.e0 = predicted_e0
+        path2chi(path_predicted)
+        xftf(path_predicted, kweight=k_weight, kmin=kmin, kmax=kmax)
+        xftr(path_predicted, rmin=rmin, rmax=rmax)
+
+        interpolated_predicted = interpolate_spectrum(path_predicted.q, path_predicted.chiq_re, k_grid)
+
+        return interpolated_predicted
+
+    def get_MSE_error(self, interpolated_artemis, interpolated_exp):
+        
+        kmin = self.k_range[0]
+        kmax = self.k_range[1]
+        k_grid = self.config["neural_network"]["k_grid"]
+        k_grid = np.array(k_grid, dtype=np.float32)
+
+
+        # get exp in range
+        interpolated_exp_in_range = [i[1] for i in zip(k_grid, interpolated_exp) if kmin <= i[0] <= kmax]
+        interpolated_exp_in_range = np.array(interpolated_exp_in_range)
+
+        # MSE error between predicted and artemis with nano
+        interpolated_artemis_in_range = [i[1] for i in zip(k_grid, interpolated_artemis) if kmin <= i[0] <= kmax]
+        interpolated_artemis_in_range = np.array(interpolated_artemis_in_range)
+
+        e2 = np.mean((interpolated_artemis_in_range - interpolated_exp_in_range)**2)
+
+        return e2
+
+    def plot_results(self):
+        predictions = self.run_predictions()
+        num_predictions = len(predictions)
+
+        # ============================
+        # Plot Parameters
+        # ============================
+        num_param_plots = 4
+        fig_params, axs_params = plt.subplots(1, num_param_plots, figsize=(20, 4))
+
+        # find min and max artimis values
+        all_artemis = [pred['artemis_result'] for pred in predictions]
+        all_artemis = np.array(all_artemis)
+        min_artemis = np.min(all_artemis, axis=0)
+        max_artemis = np.max(all_artemis, axis=0)
+
+        for pred in predictions:
+            # Plot Delta A
+            axs_params[0].errorbar(
+                pred['predicted_a'], pred['artemis_result'][0],
+                xerr=0, yerr=pred['artemis_unc'][0],
+                fmt='o', label='Predicted', color='red'
+            )
+            axs_params[0].plot(
+                [min_artemis[0]-1, max_artemis[0]+1],
+                [min_artemis[0]-1, max_artemis[0]+1],
+                'r--'
+            )
+            axs_params[0].set_title('Delta A')
+            axs_params[0].set_xlabel('NN')
+            axs_params[0].set_ylabel('Artemis')
+            axs_params[0].tick_params(axis='both', which='major', labelsize=8)
+
+            # Plot Delta R
+            axs_params[1].errorbar(
+                pred['predicted_deltar'], pred['artemis_result'][1],
+                xerr=0, yerr=pred['artemis_unc'][1],
+                fmt='o', label='Predicted', color='red'
+            )
+            axs_params[1].plot(
+                [min_artemis[1]-0.1, max_artemis[1]+0.1],
+                [min_artemis[1]-0.1, max_artemis[1]+0.1],
+                'r--'
+            )
+            axs_params[1].set_title('Delta R')
+            axs_params[1].set_xlabel('NN')
+            axs_params[1].set_ylabel('Artemis')
+            axs_params[1].tick_params(axis='both', which='major', labelsize=8)
+
+            # Plot Sigma2
+            axs_params[2].errorbar(
+                pred['predicted_sigma2'], pred['artemis_result'][2],
+                xerr=0, yerr=pred['artemis_unc'][2],
+                fmt='o', label='Predicted', color='red'
+            )
+            axs_params[2].plot(
+                [min_artemis[2]-0.01, max_artemis[2]+0.01],
+                [min_artemis[2]-0.01, max_artemis[2]+0.01],
+                'r--'
+            )
+            axs_params[2].set_title('Sigma2')
+            axs_params[2].set_xlabel('NN')
+            axs_params[2].set_ylabel('Artemis')
+            axs_params[2].tick_params(axis='both', which='major', labelsize=8)
+
+            # Plot E0
+            axs_params[3].errorbar(
+                pred['predicted_e0'], pred['artemis_result'][3],
+                xerr=0, yerr=pred['artemis_unc'][3],
+                fmt='o', label='Predicted', color='red'
+            )
+            axs_params[3].plot(
+                [-10, 10], [-10, 10], 'r--'
+            )
+            axs_params[3].set_title('E0')
+            axs_params[3].set_xlabel('NN')
+            axs_params[3].set_ylabel('Artemis')
+            axs_params[3].tick_params(axis='both', which='major', labelsize=8)
+
+        plt.tight_layout()
+        plt.savefig('parameters.png')
+        plt.close(fig_params)  # Close the figure to free memory
+
+        # ============================
+        # Plot Q-space
+        # ============================
+        # Determine grid size based on number of predictions
+        cols_q = 3  # Number of columns in the grid
+        rows_q = math.ceil(num_predictions / cols_q)
+
+        fig_q, axs_q = plt.subplots(rows_q, cols_q, figsize=(5 * cols_q, 4 * rows_q))
+        axs_q = axs_q.flatten() if num_predictions > 1 else [axs_q]
+
+        for idx, pred in enumerate(predictions):
+            ax = axs_q[idx]
+            k_grid = self.config["neural_network"]["k_grid"]
+            k_grid = np.array(k_grid, dtype=np.float32) # TODO fix this
+
+            interpolated_chi_q = pred['interpolated_chi_q']
+            interpolated_artemis = self.build_synth_spectra(pred['artemis_result'])
+
+            mse_error = self.get_MSE_error(interpolated_chi_q, interpolated_artemis)
+
+            ax.plot(k_grid, interpolated_chi_q, label='Experimental', color='black')
+            ax.plot(
+                k_grid, interpolated_artemis,
+                label=f'Artemis MSE = {mse_error:.3f}', color='blue'
+            )
+            ax.set_xlim(2, 14)
+            ax.set_title(f'Q-space Prediction {idx + 1}')
+            ax.legend()
+            ax.set_xlabel('k')
+            ax.set_ylabel('Chi Q')
+            ax.tick_params(axis='both', which='major', labelsize=8)
+
+        # Remove any unused subplots
+        for idx in range(num_predictions, rows_q * cols_q):
+            fig_q.delaxes(axs_q[idx])
+
+        plt.tight_layout()
+        plt.savefig('qspace.png')
+        plt.close(fig_q) 
+
+    # def plot_results(self):
+    #     predictions = self.run_predictions()
+    #     num_plots = 5
+    #     fig, axs = plt.subplots(1, num_plots, figsize=(20, 4))
+
+    #     for pred in predictions:
+    #         # Plot A
+    #         axs[0].errorbar(pred['predicted_a'], pred['artemis_result'][0],
+    #                     xerr=0, yerr=pred['artemis_unc'][0],
+    #                     fmt='o', label='Predicted', color='red')
+    #         axs[0].plot([pred['artemis_result'][0]-0.1, pred['artemis_result'][0]+0.1],
+    #                     [pred['artemis_result'][0]-0.1, pred['artemis_result'][0]+0.1],
+    #                     'r--')
+    #         axs[0].set_title('Delta A')
+    #         axs[0].set_xlabel('NN')
+    #         axs[0].set_ylabel('Artemis')
+    #         axs[0].tick_params(axis='both', which='major', labelsize=8)
+
+    #         # Plot Delta R
+    #         axs[1].errorbar(pred['predicted_deltar'], pred['artemis_result'][1],
+    #                     xerr=0, yerr=pred['artemis_unc'][1],
+    #                     fmt='o', label='Predicted', color='red')
+    #         axs[1].plot([pred['artemis_result'][1]-0.1, pred['artemis_result'][1]+0.1],
+    #                     [pred['artemis_result'][1]-0.1, pred['artemis_result'][1]+0.1],
+    #                     'r--')
+    #         axs[1].set_title('Delta R')
+    #         axs[1].set_xlabel('NN')
+    #         axs[1].set_ylabel('Artemis')
+    #         axs[1].tick_params(axis='both', which='major', labelsize=8)
+
+    #         # Plot Sigma2
+    #         axs[2].errorbar(pred['predicted_sigma2'], pred['artemis_result'][2],
+    #                     xerr=0, yerr=pred['artemis_unc'][2],
+    #                     fmt='o', label='Predicted', color='red')
+    #         axs[2].plot([pred['artemis_result'][2]-0.02, pred['artemis_result'][2]+0.02],
+    #                     [pred['artemis_result'][2]-0.02, pred['artemis_result'][2]+0.02],
+    #                     'r--')
+    #         axs[2].set_title('Sigma2')
+    #         axs[2].set_xlabel('NN')
+    #         axs[2].set_ylabel('Artemis')
+    #         axs[2].tick_params(axis='both', which='major', labelsize=8)
+
+    #         # Plot E0
+    #         axs[3].errorbar(pred['predicted_e0'], pred['artemis_result'][3],
+    #                     xerr=0, yerr=pred['artemis_unc'][3],
+    #                     fmt='o', label='Predicted', color='red')
+    #         axs[3].plot([-10, 10], [-10, 10], 'r--')
+    #         axs[3].set_title('E0')
+    #         axs[3].set_xlabel('NN')
+    #         axs[3].set_ylabel('Artemis')
+    #         axs[3].tick_params(axis='both', which='major', labelsize=8)
+
+    #         # Plot Q-space
+    #         k_grid = self.config["neural_network"]["k_grid"]
+    #         interpolated_chi_q = pred['interpolated_chi_q']
+    #         interpolated_artemis = self.build_synth_spectra(pred['artemis_result'])
+
+    #         axs[4].plot(k_grid, interpolated_chi_q, label='Experimental', color='black')
+    #         axs[4].plot(k_grid, interpolated_artemis, label=f'Artemis MSE = {self.get_MSE_error(interpolated_chi_q, interpolated_artemis):.3f}', color='blue')
+    #         axs[4].set_xlim(2, 14)
+    #         axs[4].set_title('Q-space')
+    #         axs[4].legend()
+
+    #     plt.tight_layout()
+    #     plt.savefig('results.png')
+
+
 
     def predict_on_experimental_data(self):
 

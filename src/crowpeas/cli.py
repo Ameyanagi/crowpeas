@@ -178,8 +178,8 @@ def run_crowpeas(
 
     if experiment:
         console.print("Looking for experimental config file")
-        cp.predict_on_experimental_data()
-        
+        #cp.predict_on_experimental_data()
+        cp.plot_results()
         
 
     return
