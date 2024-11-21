@@ -2,6 +2,9 @@
 crowpeas
 ========
 
+.. image:: images/g993.png
+   :alt: crowpeas logo
+   :align: center
 
 .. image:: https://img.shields.io/pypi/v/crowpeas.svg
         :target: https://pypi.python.org/pypi/crowpeas
