@@ -1252,7 +1252,9 @@ class CrowPeas:
 
             mse_error = self.get_MSE_error(interpolated_chi_q, interpolated_artemis)
 
-            ax.plot(k_grid, interpolated_chi_q, label=f'MLP @ {dataset_names[idx]} MSE = {mse_error:.3f}', color=color)
+            network_type = self.config["neural_network"]["architecture"]["type"]
+
+            ax.plot(k_grid, interpolated_chi_q, label=f'MLP @ {dataset_names[idx]} {network_type} = {mse_error:.3f}', color=color)
             ax.plot(
                 k_grid, interpolated_artemis,
                 label='Artemis', color="black"
