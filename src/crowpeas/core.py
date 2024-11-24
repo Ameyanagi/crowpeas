@@ -1049,13 +1049,15 @@ class CrowPeas:
         dataset_dirs = self.config['experiment']['dataset_dir']
         artemis_results = self.config['artemis']['result']
         artemis_unc = self.config['artemis']['unc']
+        dataset_names = self.config['experiment']['dataset_names']
 
-        predictions = []
+        self.predictions = []
 
         for i in range(len(dataset_dirs)):
             dataset_dir = dataset_dirs[i]
             artemis_result = artemis_results[i]
             artemis_unc_entry = artemis_unc[i]
+            dataset_name = dataset_names[i]
 
             # Load and preprocess data for the current dataset_dir
             interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir))
@@ -1077,7 +1079,7 @@ class CrowPeas:
                 predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
                 a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
 
-            predictions.append({
+            self.predictions.append({
                 'predicted_a': predicted_a,
                 'predicted_deltar': predicted_deltar,
                 'predicted_sigma2': predicted_sigma2,
@@ -1089,10 +1091,11 @@ class CrowPeas:
                 'interpolated_chi_k': interpolated_chi_k,
                 'interpolated_chi_q': interpolated_chi_q,
                 'artemis_result': artemis_result,
-                'artemis_unc': artemis_unc_entry
+                'artemis_unc': artemis_unc_entry,
+                'dataset_name': dataset_name
             })
 
-        return predictions
+        return self.predictions
 
     def build_synth_spectra(self, predicted_params: list | np.ndarray):
 
@@ -1141,6 +1144,25 @@ class CrowPeas:
         e2 = np.mean((interpolated_artemis_in_range - interpolated_exp_in_range)**2)
 
         return e2
+
+    def save_predictions_to_toml(self, filename):
+        with open(filename, 'w') as file:
+            for i, prediction in enumerate(self.predictions):
+                file.write(f"[prediction_{i}]\n")
+                file.write(f"dataset_name = \"{prediction['dataset_name']}\"\n")
+                file.write(f"predicted_a = {prediction['predicted_a']}\n")
+                file.write(f"predicted_deltar = {prediction['predicted_deltar']}\n")
+                file.write(f"predicted_sigma2 = {prediction['predicted_sigma2']}\n")
+                file.write(f"predicted_e0 = {prediction['predicted_e0']}\n")
+                file.write(f"uncertainty_a = {prediction['uncertainty_a']}\n")
+                file.write(f"uncertainty_deltar = {prediction['uncertainty_deltar']}\n")
+                file.write(f"uncertainty_sigma2 = {prediction['uncertainty_sigma2']}\n")
+                file.write(f"uncertainty_e0 = {prediction['uncertainty_e0']}\n")
+                file.write(f"interpolated_chi_k = \"{prediction['interpolated_chi_k']}\"\n")
+                file.write(f"interpolated_chi_q = \"{prediction['interpolated_chi_q']}\"\n")
+                file.write(f"artemis_result = \"{prediction['artemis_result']}\"\n")
+                file.write(f"artemis_unc = \"{prediction['artemis_unc']}\"\n")
+                file.write("\n")
 
 
     def plot_results(self):
@@ -1254,7 +1276,7 @@ class CrowPeas:
 
             network_type = self.config["neural_network"]["architecture"]["type"]
 
-            ax.plot(k_grid, interpolated_chi_q, label=f'MLP @ {dataset_names[idx]} {network_type} = {mse_error:.3f}', color=color)
+            ax.plot(k_grid, interpolated_chi_q, label=f'{network_type} @ {dataset_names[idx]} MSE = {mse_error:.3f}', color=color)
             ax.plot(
                 k_grid, interpolated_artemis,
                 label='Artemis', color="black"
