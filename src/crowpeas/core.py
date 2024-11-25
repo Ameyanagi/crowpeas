@@ -1145,7 +1145,15 @@ class CrowPeas:
 
         return e2
 
+
+
     def save_predictions_to_toml(self, filename):
+        def tensor_to_list(tensor):
+            # Convert the tensor to a NumPy array and then to a list
+            #tensor_np = tensor.detach().cpu().numpy()  # Ensure tensor is on CPU and detached from the computation graph
+            tensor_list = tensor.tolist()
+            return tensor_list
+
         with open(filename, 'w') as file:
             for i, prediction in enumerate(self.predictions):
                 file.write(f"[prediction_{i}]\n")
@@ -1158,11 +1166,30 @@ class CrowPeas:
                 file.write(f"uncertainty_deltar = {prediction['uncertainty_deltar']}\n")
                 file.write(f"uncertainty_sigma2 = {prediction['uncertainty_sigma2']}\n")
                 file.write(f"uncertainty_e0 = {prediction['uncertainty_e0']}\n")
-                file.write(f"interpolated_chi_k = \"{prediction['interpolated_chi_k']}\"\n")
-                file.write(f"interpolated_chi_q = \"{prediction['interpolated_chi_q']}\"\n")
+                file.write(f"interpolated_chi_k = {tensor_to_list(prediction['interpolated_chi_k'])}\n")
+                file.write(f"interpolated_chi_q = {tensor_to_list(prediction['interpolated_chi_q'])}\n")
                 file.write(f"artemis_result = \"{prediction['artemis_result']}\"\n")
                 file.write(f"artemis_unc = \"{prediction['artemis_unc']}\"\n")
                 file.write("\n")
+
+    # def save_predictions_to_toml(self, filename):
+    #     with open(filename, 'w') as file:
+    #         for i, prediction in enumerate(self.predictions):
+    #             file.write(f"[prediction_{i}]\n")
+    #             file.write(f"dataset_name = \"{prediction['dataset_name']}\"\n")
+    #             file.write(f"predicted_a = {prediction['predicted_a']}\n")
+    #             file.write(f"predicted_deltar = {prediction['predicted_deltar']}\n")
+    #             file.write(f"predicted_sigma2 = {prediction['predicted_sigma2']}\n")
+    #             file.write(f"predicted_e0 = {prediction['predicted_e0']}\n")
+    #             file.write(f"uncertainty_a = {prediction['uncertainty_a']}\n")
+    #             file.write(f"uncertainty_deltar = {prediction['uncertainty_deltar']}\n")
+    #             file.write(f"uncertainty_sigma2 = {prediction['uncertainty_sigma2']}\n")
+    #             file.write(f"uncertainty_e0 = {prediction['uncertainty_e0']}\n")
+    #             file.write(f"interpolated_chi_k = \"{prediction['interpolated_chi_k']}\"\n")
+    #             file.write(f"interpolated_chi_q = \"{prediction['interpolated_chi_q']}\"\n")
+    #             file.write(f"artemis_result = \"{prediction['artemis_result']}\"\n")
+    #             file.write(f"artemis_unc = \"{prediction['artemis_unc']}\"\n")
+    #             file.write("\n")
 
 
     def plot_results(self):
