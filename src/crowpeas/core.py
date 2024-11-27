@@ -94,6 +94,7 @@ class CrowPeas:
     # synthetic spectra for training
     synthetic_spectra: SyntheticSpectrum
     data_loader: CrowPeasDataModule
+    history: dict = {"train_loss": [], "val_loss": []}
 
     # only used for validating the test results
     x_test: torch.Tensor
@@ -799,7 +800,9 @@ class CrowPeas:
         self.model = torch.compile(self.model)
         callback = self.create_checkpoint_callback()
 
-        trainer = pl.Trainer(max_epochs=self.epochs, callbacks=[callback])
+        history_logger = HistoryLogger(self.history)
+        callbacks = [callback, history_logger]  # Add to existing checkpoint callback
+        trainer = pl.Trainer(max_epochs=self.epochs, callbacks=callbacks)
         trainer.fit(
             self.model,
             self.data_loader.train_dataloader(batch_size=self.batch_size),
@@ -1223,24 +1226,7 @@ class CrowPeas:
                 file.write(f"artemis_unc = \"{prediction['artemis_unc']}\"\n")
                 file.write("\n")
 
-    # def save_predictions_to_toml(self, filename):
-    #     with open(filename, 'w') as file:
-    #         for i, prediction in enumerate(self.predictions):
-    #             file.write(f"[prediction_{i}]\n")
-    #             file.write(f"dataset_name = \"{prediction['dataset_name']}\"\n")
-    #             file.write(f"predicted_a = {prediction['predicted_a']}\n")
-    #             file.write(f"predicted_deltar = {prediction['predicted_deltar']}\n")
-    #             file.write(f"predicted_sigma2 = {prediction['predicted_sigma2']}\n")
-    #             file.write(f"predicted_e0 = {prediction['predicted_e0']}\n")
-    #             file.write(f"uncertainty_a = {prediction['uncertainty_a']}\n")
-    #             file.write(f"uncertainty_deltar = {prediction['uncertainty_deltar']}\n")
-    #             file.write(f"uncertainty_sigma2 = {prediction['uncertainty_sigma2']}\n")
-    #             file.write(f"uncertainty_e0 = {prediction['uncertainty_e0']}\n")
-    #             file.write(f"interpolated_chi_k = \"{prediction['interpolated_chi_k']}\"\n")
-    #             file.write(f"interpolated_chi_q = \"{prediction['interpolated_chi_q']}\"\n")
-    #             file.write(f"artemis_result = \"{prediction['artemis_result']}\"\n")
-    #             file.write(f"artemis_unc = \"{prediction['artemis_unc']}\"\n")
-    #             file.write("\n")
+
 
 
     def plot_results(self):
@@ -1373,6 +1359,35 @@ class CrowPeas:
         plt.tight_layout()
         plt.savefig('qspace.png')
         plt.close(fig_q)
+
+    def plot_training_history(self, save_path="training_history.png"):
+        """Plot training and validation loss curves"""
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.history["train_loss"], label="Training Loss")
+        plt.plot(self.history["val_loss"], label="Validation Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Training History")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path)
+        
+        return plt.gcf()
+
+
+class HistoryLogger(pl.Callback):
+    def __init__(self, history):
+        super().__init__()
+        self.history = history
+        
+    def on_train_epoch_end(self, trainer, pl_module):
+        self.history["train_loss"].append(trainer.callback_metrics["train/loss"].item())
+        
+    def on_validation_epoch_end(self, trainer, pl_module):
+        self.history["val_loss"].append(trainer.callback_metrics["val/loss"].item())
 
 
     # def plot_results(self):

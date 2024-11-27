@@ -167,6 +167,7 @@ def run_crowpeas(
 
         console.print("Training the model")
         cp.train()
+        cp.plot_training_history()
 
     if validate:
         console.print("Validating the config file")
