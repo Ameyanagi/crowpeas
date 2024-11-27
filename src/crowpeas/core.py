@@ -11,6 +11,7 @@ from .data_loader import CrowPeasDataModule
 import lightning as pl
 from .model.BNN import BNN
 from .model.MLP import MLP
+from .model.HetMLPNM import hetMLP
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
@@ -21,7 +22,8 @@ from .utils import (
     normalize_spectra,
     denormalize_spectra,
     interpolate_spectrum,
-    predict_with_uncertainty
+    predict_with_uncertainty,
+    predict_with_uncertainty_hetMLP
 )
 from larch.xafs import xftf, xftr, feffpath, path2chi, ftwindow
 from larch.io import read_ascii
@@ -60,7 +62,7 @@ class CrowPeas:
     model: pl.LightningModule
 
     # parameters related to neural network architecture
-    nn_type: Literal["MLP", "BNN"]
+    nn_type: Literal["MLP", "BNN", "hetMLP"]
     nn_activation: str
     nn_output_activation: str
     nn_output_dim: int
@@ -711,6 +713,10 @@ class CrowPeas:
             self.model = MLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
+        elif self.nn_type.lower().startswith("het"):
+            self.model = hetMLP.load_from_checkpoint(
+                os.path.join(self.checkpoint_dir, self.checkpoint_name)
+            )
 
         return self
 
@@ -731,6 +737,20 @@ class CrowPeas:
             )
         elif self.nn_type.lower().startswith("mlp"):
             self.model = MLP(
+                hidden_layers=self.nn_hidden_dims,
+                output_size=self.nn_output_dim,
+                k_min=self.k_range[0],
+                k_max=self.k_range[1],
+                r_min=self.r_range[0],
+                r_max=self.r_range[1],
+                rmax_out=6,
+                window="kaiser",
+                dx=1,
+                input_form="r",
+                activation=self.nn_activation,
+            )
+        elif self.nn_type.lower().startswith("het"):
+            self.model = hetMLP(
                 hidden_layers=self.nn_hidden_dims,
                 output_size=self.nn_output_dim,
                 k_min=self.k_range[0],
@@ -836,6 +856,25 @@ class CrowPeas:
 
         return self
 
+    def predict_and_denormalize_hetMLP(self, spectrum: torch.Tensor):
+        if not hasattr(self, "model") or self.model is None:
+            self.load_model()
+
+        if not hasattr(self, "norm_params_spectra") or self.norm_params_spectra is None:
+            raise ValueError("Normalization parameters are not available")
+
+        if (
+            not hasattr(self, "norm_params_parameters")
+            or self.norm_params_parameters is None
+        ):
+            raise ValueError("Normalization parameters are not available")
+
+        self.model.eval()
+
+        self.denormalized_test_pred = predict_with_uncertainty_hetMLP(self.model, spectrum, self.norm_params_parameters)
+
+        return self
+
     def denormalize_data(self, data: torch.Tensor | np.ndarray):
 
         if not hasattr(self, "norm_params_spectra") or self.norm_params_spectra is None:
@@ -874,9 +913,15 @@ class CrowPeas:
         with torch.no_grad():
             self.test_pred = self.model(self.x_test.to(self.model.device))
 
-        self.denormalized_x_test = self.denormalize_spectra(self.x_test)
-        self.denormalized_y_test = self.denormalize_data(self.y_test)
-        self.denormalized_test_pred = self.denormalize_data(self.test_pred)
+        if self.nn_type.lower().startswith("het"):
+            self.test_pred_mu, self.test_pred_sigma = self.test_pred # test_pred is a tuple for hetMLP
+            self.denormalized_x_test = self.denormalize_spectra(self.x_test)
+            self.denormalized_y_test = self.denormalize_data(self.y_test)
+            self.denormalized_test_pred = self.denormalize_data(self.test_pred_mu)
+        else:
+            self.denormalized_x_test = self.denormalize_spectra(self.x_test)
+            self.denormalized_y_test = self.denormalize_data(self.y_test)
+            self.denormalized_test_pred = self.denormalize_data(self.test_pred)
 
         return self
 
@@ -1079,6 +1124,12 @@ class CrowPeas:
                 predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
                 a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
 
+            if network_type == "hetMLP":
+                self.predict_and_denormalize_hetMLP(normalized_chi_k[0])
+                preds, uncs = self.denormalized_test_pred
+                predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds[0]
+                a_unc, deltar_unc, sigma2_unc, e0_unc = uncs[0]
+
             self.predictions.append({
                 'predicted_a': predicted_a,
                 'predicted_deltar': predicted_deltar,
@@ -1217,7 +1268,7 @@ class CrowPeas:
             # Plot Delta A
             axs_params[0].errorbar(
                 pred['predicted_a'], pred['artemis_result'][0],
-                xerr=0, yerr=pred['artemis_unc'][0],
+                xerr=pred['uncertainty_a'], yerr=pred['artemis_unc'][0],
                 fmt='o', label=dataset_names[idx], color=color
             )
             axs_params[0].plot(
@@ -1233,7 +1284,7 @@ class CrowPeas:
             # Plot Delta R
             axs_params[1].errorbar(
                 pred['predicted_deltar'], pred['artemis_result'][1],
-                xerr=0, yerr=pred['artemis_unc'][1],
+                xerr=pred['uncertainty_deltar'], yerr=pred['artemis_unc'][1],
                 fmt='o', label=dataset_names[idx], color=color
             )
             axs_params[1].plot(
@@ -1249,7 +1300,7 @@ class CrowPeas:
             # Plot Sigma2
             axs_params[2].errorbar(
                 pred['predicted_sigma2'], pred['artemis_result'][2],
-                xerr=0, yerr=pred['artemis_unc'][2],
+                xerr=pred['uncertainty_sigma2'], yerr=pred['artemis_unc'][2],
                 fmt='o', label=dataset_names[idx], color=color
             )
             axs_params[2].plot(
@@ -1265,7 +1316,7 @@ class CrowPeas:
             # Plot E0
             axs_params[3].errorbar(
                 pred['predicted_e0'], pred['artemis_result'][3],
-                xerr=0, yerr=pred['artemis_unc'][3],
+                xerr=pred['uncertainty_e0'], yerr=pred['artemis_unc'][3],
                 fmt='o', label=dataset_names[idx], color=color
             )
             axs_params[3].plot(

@@ -74,6 +74,7 @@ def denormalize_data(normalized_data: np.ndarray, norm_params: dict) -> np.ndarr
     Returns:
         np.ndarray: Denormalized data.
     """
+
     min_val = norm_params["min"]
     min_val = np.array(min_val).astype(np.float32)
     max_val = norm_params["max"]
@@ -154,7 +155,56 @@ def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, nor
 
     return mean_predictions, uncertainty
 
+def denormalize_std(std_normalized: np.ndarray, norm_params: dict) -> np.ndarray:
+    """Denormalize the standard deviation from the normalized scale to the original scale.
 
+    Args:
+        std_normalized (np.ndarray): The standard deviation in the normalized scale.
+        norm_params (dict): Dictionary containing the min and max values for each feature.
+
+    Returns:
+        np.ndarray: Denormalized standard deviation.
+    """
+    # Extract normalization parameters
+    min_val = np.array(norm_params["min"]).astype(np.float32)
+    max_val = np.array(norm_params["max"]).astype(np.float32)
+    feature_min = np.array(norm_params["feature_min"]).astype(np.float32)
+    feature_max = np.array(norm_params["feature_max"]).astype(np.float32)
+    
+    # Compute scaling factor 'a'
+    data_range = max_val - min_val
+    feature_range = feature_max - feature_min
+    a = feature_range / data_range
+    
+    # Denormalize the standard deviation
+    std_original = std_normalized / a
+    
+    return std_original
+
+
+def predict_with_uncertainty_hetMLP(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict):
+    device = next(model.parameters()).device
+    model.eval()
+    
+    # Ensure input_data is a tensor and move to the appropriate device
+    if not isinstance(input_data, torch.Tensor):
+        input_data = torch.tensor(input_data, dtype=torch.float32)
+    input_data = input_data.to(device)
+    
+    with torch.no_grad():
+        # Get mean and log variance from the model
+        mean, log_var = model(input_data)
+        std = torch.exp(0.5 * log_var)  # Convert log variance to standard deviation
+
+        # Move tensors to CPU and convert to numpy arrays
+        mean = mean.cpu().numpy()
+        std = std.cpu().numpy()
+
+        # Denormalize mean and standard deviation
+        mean_predictions = denormalize_data(mean, norm_params)
+        std_predictions = denormalize_std(std, norm_params)
+
+    return mean_predictions, std_predictions
 
 # TODO: refactor
 def plot_MSE_error_in_krange(
