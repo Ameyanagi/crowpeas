@@ -149,8 +149,7 @@ def run_crowpeas(
         cp.init_synthetic_spectra(generate=True)
         cp.save_training_data()
         cp.save_config()
-    if experiment:
-        pass
+
     else:
         console.print("Trying to load dataset, if exists")
         cp.load_synthetic_spectra()
