@@ -11,6 +11,7 @@ from .data_loader import CrowPeasDataModule
 import lightning as pl
 from .model.BNN import BNN
 from .model.MLP import MLP
+from .model.CNN import CNN
 from .model.HetMLPNM import hetMLP
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -62,11 +63,13 @@ class CrowPeas:
     model: pl.LightningModule
 
     # parameters related to neural network architecture
-    nn_type: Literal["MLP", "BNN", "hetMLP"]
+    nn_type: Literal["MLP", "BNN", "hetMLP", "CNN"]
     nn_activation: str
     nn_output_activation: str
     nn_output_dim: int
     nn_hidden_dims: Sequence[int]
+    nn_filter_sizes: Sequence[int]
+    nn_kernel_sizes: Sequence[int]
     nn_k_grid: np.ndarray
 
     # parameters related to training mode
@@ -78,6 +81,7 @@ class CrowPeas:
     training_mode: bool
     num_examples: int
     spectrum_noise: bool
+    input_type: str
     noise_range: Sequence[float]
     k_range: Sequence[float]
     r_range: Sequence[float]
@@ -142,6 +146,7 @@ class CrowPeas:
             "k_weight",
             "spectrum_noise",
             "noise_range",
+            "input_type",
             "k_range",
         ]
         required_for_training_param_ranges = ["s02", "degen", "deltar", "sigma2", "e0"]
@@ -158,6 +163,8 @@ class CrowPeas:
             "output_activation",
             "output_dim",
             "hidden_dims",
+            "filter_sizes",
+            "kernel_sizes",
         ]
         required_for_experiment = [
             "dataset_names",
@@ -325,6 +332,12 @@ class CrowPeas:
         self.nn_hidden_dims = self.config["neural_network"]["architecture"][
             "hidden_dims"
         ]
+        self.nn_filter_sizes = self.config["neural_network"]["architecture"][
+            "filter_sizes"
+        ]
+        self.nn_kernel_sizes = self.config["neural_network"]["architecture"][
+            "kernel_sizes"
+        ]
         self.nn_k_grid = self.config["neural_network"].get("k_grid", None)
 
         if self.training_mode:
@@ -348,6 +361,7 @@ class CrowPeas:
             self.num_examples = self.config["training"]["num_examples"]
             self.spectrum_noise = self.config["training"]["spectrum_noise"]
             self.noise_range = self.config["training"]["noise_range"]
+            self.input_type = self.config["training"].get("input_type", "r")
             self.k_range = self.config["training"]["k_range"]
             self.k_weight = self.config["training"]["k_weight"]
             self.r_range = self.config["training"]["r_range"]
@@ -429,6 +443,7 @@ class CrowPeas:
                     "num_examples": self.num_examples,
                     "spectrum_noise": self.spectrum_noise,
                     "noise_range": self.noise_range,
+                    "input_type": self.input_type,
                     "k_range": self.k_range,
                     "k_weight": self.k_weight,
                     "r_range": self.r_range,
@@ -454,6 +469,8 @@ class CrowPeas:
                     "output_activation": self.nn_output_activation,
                     "output_dim": self.nn_output_dim,
                     "hidden_dims": self.nn_hidden_dims,
+                    "filter_sizes": self.nn_filter_sizes,
+                    "kernel_sizes": self.nn_kernel_sizes,
                 },
                 "k_grid": self.nn_k_grid,
             },
@@ -486,6 +503,7 @@ class CrowPeas:
                     "num_examples": self.num_examples,
                     "spectrum_noise": self.spectrum_noise,
                     "noise_range": self.noise_range,
+                    "input_type": self.input_type,
                     "k_range": self.k_range,
                     "k_weight": self.k_weight,
                     "r_range": self.r_range,
@@ -511,6 +529,8 @@ class CrowPeas:
                     "output_activation": self.nn_output_activation,
                     "output_dim": self.nn_output_dim,
                     "hidden_dims": self.nn_hidden_dims,
+                    "filter_sizes": self.nn_filter_sizes,
+                    "kernel_sizes": self.nn_kernel_sizes,
                 },
                 "k_grid": self.nn_k_grid,
             },
@@ -549,6 +569,7 @@ class CrowPeas:
                         "num_examples": self.num_examples,
                         "spectrum_noise": self.spectrum_noise,
                         "noise_range": self.noise_range,
+                        "input_type": self.input_type,
                         "k_range": self.k_range,
                         "k_weight": self.k_weight,
                         "r_range": self.r_range,
@@ -574,6 +595,8 @@ class CrowPeas:
                         "output_activation": self.nn_output_activation,
                         "output_dim": self.nn_output_dim,
                         "hidden_dims": self.nn_hidden_dims,
+                        "filter_sizes": self.nn_filter_sizes,
+                        "kernel_sizes": self.nn_kernel_sizes,
                     },
                     "k_grid": self.nn_k_grid,
                 },
@@ -714,6 +737,10 @@ class CrowPeas:
             self.model = MLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
+        elif self.nn_type.lower().startswith("cnn"):
+            self.model = CNN.load_from_checkpoint(
+                os.path.join(self.checkpoint_dir, self.checkpoint_name)
+            )            
         elif self.nn_type.lower().startswith("het"):
             self.model = hetMLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
@@ -726,6 +753,7 @@ class CrowPeas:
             self.model = BNN(
                 hidden_layers=self.nn_hidden_dims,
                 output_size=self.nn_output_dim,
+                input_form=self.input_type,
                 k_min=self.k_range[0],
                 k_max=self.k_range[1],
                 r_min=self.r_range[0],
@@ -733,12 +761,27 @@ class CrowPeas:
                 rmax_out=6,
                 window="kaiser",
                 dx=1,
-                input_form="r",
                 activation=self.nn_activation,
             )
         elif self.nn_type.lower().startswith("mlp"):
             self.model = MLP(
                 hidden_layers=self.nn_hidden_dims,
+                output_size=self.nn_output_dim,
+                input_form=self.input_type,
+                k_min=self.k_range[0],
+                k_max=self.k_range[1],
+                r_min=self.r_range[0],
+                r_max=self.r_range[1],
+                rmax_out=6,
+                window="kaiser",
+                dx=1,
+                activation=self.nn_activation,
+            )
+        elif self.nn_type.lower().startswith("cnn"):
+            self.model = CNN(
+                hidden_layers=self.nn_hidden_dims,
+                num_filters=self.nn_filter_sizes,
+                kernel_sizes=self.nn_kernel_sizes,
                 output_size=self.nn_output_dim,
                 k_min=self.k_range[0],
                 k_max=self.k_range[1],
@@ -747,9 +790,9 @@ class CrowPeas:
                 rmax_out=6,
                 window="kaiser",
                 dx=1,
-                input_form="r",
+                input_form=self.input_type,
                 activation=self.nn_activation,
-            )
+            )            
         elif self.nn_type.lower().startswith("het"):
             self.model = hetMLP(
                 hidden_layers=self.nn_hidden_dims,
@@ -761,7 +804,7 @@ class CrowPeas:
                 rmax_out=6,
                 window="kaiser",
                 dx=1,
-                input_form="r",
+                input_form=self.input_type,
                 activation=self.nn_activation,
             )
 
@@ -1123,6 +1166,11 @@ class CrowPeas:
                 a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
 
             if network_type == "MLP":
+                self.predict_and_denormalize(normalized_chi_k[0])
+                predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+                a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
+
+            if network_type == "CNN":
                 self.predict_and_denormalize(normalized_chi_k[0])
                 predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
                 a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
