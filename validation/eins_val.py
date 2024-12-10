@@ -12,6 +12,9 @@ import scipy.constants as const
 
 
 
+
+
+
 # read data from dir
 
 feff_path_file_rh = "/home/nick/Projects/crowpeas/feff/Rhfeff0001.dat"
@@ -87,22 +90,22 @@ plt.plot(theta, sigma2_array_pd, label="Pd", color='black')
 # add predicted theta to plot as red dot
 ss2_nn_rh = 0.0026
 ss2_art_rh = 0.0037
-theta_rh = 350
+theta_rh = 350 * (1/1.27)
 plt.scatter(theta_rh, ss2_nn_rh, color='red', label = "Rh NN")
 
 ss2_nn_au = 0.0080
 ss2_art_au = 0.0080
-theta_au = 124
+theta_au = 178 * (1/1.27)
 plt.scatter(theta_au, ss2_nn_au, color='green', label = "Au NN")
 
 ss2_nn_pt = 0.0041
 ss2_art_pt = 0.0050
-theta_pt = 179
+theta_pt = 225 * (1/1.27)
 plt.scatter(theta_pt, ss2_nn_pt, color='blue', label = "Pt NN")
 
 ss2_nn_pd = 0.0052
 ss2_art_pd = 0.006
-theta_pd = 221
+theta_pd = 275 * (1/1.27)
 plt.scatter(theta_pd, ss2_nn_pd, color='black', label = "Pd NN")
 
 
@@ -127,7 +130,7 @@ plt.title("Sigma^2 vs Theta for Room temp sample")
 
 plt.savefig("sigma2_vs_theta.png")
 
-print(sigma2_array_au[:10], sigma2_array_pt[:10])
+#print(sigma2_array_au[:10], sigma2_array_pt[:10])
 
 
 

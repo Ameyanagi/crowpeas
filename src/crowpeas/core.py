@@ -1108,7 +1108,7 @@ class CrowPeas:
             dataset_name = dataset_names[i]
 
             # Load and preprocess data for the current dataset_dir
-            interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir))
+            interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir)) # this is the exp data in k and q
             interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
 
             # Normalize the data
@@ -1335,15 +1335,23 @@ class CrowPeas:
 
             interpolated_chi_q = pred['interpolated_chi_q']
             interpolated_artemis = self.build_synth_spectra(pred['artemis_result'])
+            predicted_parameter_array = [pred['predicted_a'], pred['predicted_deltar'], pred['predicted_sigma2'], pred['predicted_e0']]
+            interpolated_nn = self.build_synth_spectra(predicted_parameter_array)
 
-            mse_error = self.get_MSE_error(interpolated_chi_q, interpolated_artemis)
+            mse_error_artemis = self.get_MSE_error(interpolated_artemis, interpolated_chi_q)
+            mse_error_nn = self.get_MSE_error(interpolated_nn,interpolated_chi_q)
+
 
             network_type = self.config["neural_network"]["architecture"]["type"]
 
-            ax.plot(k_grid, interpolated_chi_q, label=f'{network_type} @ {dataset_names[idx]} MSE = {mse_error:.3f}', color=color)
+            ax.plot(k_grid, interpolated_chi_q, color=color, label='Exp')
             ax.plot(
                 k_grid, interpolated_artemis,
-                label='Artemis', color="black"
+                label=f'Artemis @ {dataset_names[idx]} MSE = {mse_error_artemis:.3f}', color="black"
+            )
+            ax.plot(
+                k_grid, interpolated_nn,
+                label=f'{network_type} @ {dataset_names[idx]} MSE = {mse_error_nn:.3f}', color="gray"
             )
             ax.set_xlim(kmin, kmax)
             ax.set_title(f'Q-space Prediction {idx + 1}')
