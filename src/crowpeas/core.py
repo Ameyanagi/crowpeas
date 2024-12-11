@@ -51,6 +51,7 @@ class CrowPeas:
     exp_config: dict
     norm_params_spectra: dict
     norm_params_parameters: dict
+    output_dir: str
 
     k: np.ndarray
 
@@ -137,7 +138,7 @@ class CrowPeas:
 
     def load_and_validate_config(self, validate_save_config=True):
         required_sections = ["general", "training", "neural_network"]
-        required_for_general = ["title", "mode"]
+        required_for_general = ["title", "mode", "output_dir"]
         required_for_training = [
             "feffpath",
             "param_ranges",
@@ -293,6 +294,7 @@ class CrowPeas:
             ]
 
         self.title = self.config["general"]["title"]
+        self.output_dir = self.config["general"]["output_dir"]
         self.norm_params_spectra = self.config["general"].get(
             "norm_params_spectra", None
         )
@@ -415,6 +417,11 @@ class CrowPeas:
 
     def save_config(self, path: str | None = None):
 
+        # check is the output directory exists, if not create it
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+        
+
         # Process norm_params_parameters
         norm_params_parameters = self.config["general"].get('norm_params_parameters')
         if isinstance(norm_params_parameters, dict):
@@ -429,6 +436,7 @@ class CrowPeas:
             "general": {
                 "title": self.title,
                 "mode": "training" if self.training_mode else "inference",
+                "output_dir": self.output_dir,
                 "seed": self.seed,
                 "norm_params_spectra": self.norm_params_spectra,
                 "norm_params_parameters": self.norm_params_parameters,
@@ -489,6 +497,7 @@ class CrowPeas:
             "general": {
                 "title": self.title,
                 "mode": "training" if self.training_mode else "inference",
+                "output_dir": self.output_dir,
                 "seed": self.seed,
                 "norm_params_spectra": self.norm_params_spectra,
                 "norm_params_parameters": self.norm_params_parameters,
@@ -555,6 +564,7 @@ class CrowPeas:
                 "general": {
                     "title": self.title,
                     "mode": "training" if self.training_mode else "inference",
+                    "output_dir": self.output_dir,
                     "seed": self.seed,
                     "norm_params_spectra": self.norm_params_spectra,
                     "norm_params_parameters": self.norm_params_parameters,
@@ -622,9 +632,13 @@ class CrowPeas:
                 )
         else:
             if self.config_filename.endswith("toml"):
-                with open(self.config_filename, "w") as f:
+                print("Saving config file")
+                print(self.config_dir)
+                print(self.output_dir)
+                save_path = os.path.join(self.config_dir, self.output_dir)
+                with open(save_path + "/" + self.config_filename, "w") as f:
                     toml.dump(self.config, f)
-            elif self.config_filename.endswith("json"):
+            elif self.config_filename.endswith("json"): #TODO add json support
                 with open(self.config_filename, "w") as f:
                     json.dump(self.config, f)
             else:
@@ -971,7 +985,10 @@ class CrowPeas:
 
         return self
 
-    def plot_parity(self, save_path="./parity.png"):
+    def plot_parity(self, save_path="/parity.png"):
+
+        save_path = os.path.join(self.config_dir, self.output_dir) + save_path 
+
         parameter_name_dict = {0: "A", 1: "deltar", 2: "sigma2", 3: "e0"}
 
         if not hasattr(self, "denormalized_y_test") or not hasattr(
@@ -1012,7 +1029,9 @@ class CrowPeas:
 
         return fig
 
-    def plot_test_spectra(self, index, save_path="./spectra.png"):
+    def plot_test_spectra(self, index, save_path="/spectra.png"):
+
+        save_path = os.path.join(self.config_dir, self.output_dir) + save_path
 
         if not hasattr(self, "denormalized_y_test") or not hasattr(
             self, "denormalized_test_pred"
@@ -1250,6 +1269,9 @@ class CrowPeas:
 
 
     def save_predictions_to_toml(self, filename):
+
+        filename = os.path.join(self.config_dir, self.output_dir) + "/" + filename
+
         def tensor_to_list(tensor):
             # Convert the tensor to a NumPy array and then to a list
             #tensor_np = tensor.detach().cpu().numpy()  # Ensure tensor is on CPU and detached from the computation graph
@@ -1363,7 +1385,7 @@ class CrowPeas:
 
         axs_params[0].legend()
         plt.tight_layout()
-        plt.savefig('parameters.png')
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) +'/parameters.png')
         plt.close(fig_params)  # Close the figure to free memory
 
         # ============================
@@ -1413,10 +1435,13 @@ class CrowPeas:
             fig_q.delaxes(axs_q[idx])
 
         plt.tight_layout()
-        plt.savefig('qspace.png')
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) +'/qspace.png')
         plt.close(fig_q)
 
-    def plot_training_history(self, save_path="training_history.png"):
+    def plot_training_history(self, save_path="/training_history.png"):
+
+        save_path = os.path.join(self.config_dir, self.output_dir) + save_path
+
         """Plot training and validation loss curves"""
         plt.figure(figsize=(10, 6))
         plt.plot(self.history["train_loss"], label="Training Loss")

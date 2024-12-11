@@ -172,9 +172,9 @@ def run_crowpeas(
     if validate:
         console.print("Validating the config file")
         cp.validate_model()
-        cp.plot_parity("./parity.png")
+        cp.plot_parity("/parity.png")
         console.print("The parity plot is generated at parity.png")
-        cp.plot_test_spectra(1, save_path="./1.png")
+        cp.plot_test_spectra(1, save_path="/1.png")
 
     if experiment:
         console.print("Looking for experimental config file")
