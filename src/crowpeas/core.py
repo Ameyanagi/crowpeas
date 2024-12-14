@@ -1,5 +1,6 @@
 """Main module."""
 
+from numpy.linalg import cond, norm
 import toml
 import os
 import math
@@ -35,6 +36,8 @@ import matplotlib.gridspec as gridspec
 import matplotlib.cm as cm
 
 import plotext as plt_t
+
+from scipy.linalg import inv
 
 # from laplace import Laplace, marglik_training
 # from copy import deepcopy
@@ -1318,6 +1321,16 @@ class CrowPeas:
         min_artemis = np.min(all_artemis, axis=0)
         max_artemis = np.max(all_artemis, axis=0)
 
+        network_type = self.config["neural_network"]["architecture"]["type"]
+        if network_type == "MLP":
+            self.get_MLP_uncertainty()
+            for idx,pred in enumerate(predictions):
+                pred['uncertainty_a'], pred['uncertainty_deltar'], pred['uncertainty_sigma2'], pred['uncertainty_e0'] = self.mlp_uncertainties[idx]
+            # dumb lazy way to add uncertainties to the predictions should make this more clear at some point.
+            for idx,pred in enumerate(predictions):
+                self.predictions[idx]['uncertainty_a'], self.predictions[idx]['uncertainty_deltar'], self.predictions[idx]['uncertainty_sigma2'], self.predictions[idx]['uncertainty_e0'] = self.mlp_uncertainties[idx]
+       
+
         colors = cm.rainbow(np.linspace(0, 1, num_predictions))
 
         for idx, (pred, color) in enumerate(zip(predictions, colors)):
@@ -1457,6 +1470,118 @@ class CrowPeas:
             plt.savefig(save_path)
         
         return plt.gcf()
+
+ 
+
+    def monte_carlo_uncertainty(self, EXAFS_experiment, predicted_params, num_samples=1000, perturb_scale=0.05):
+        sampled_params = np.random.normal(loc=predicted_params, 
+                                        scale = [perturb_scale * abs(p) for p in predicted_params], 
+                                        size=(num_samples, len(predicted_params)))
+        mse_list = []
+        for params in sampled_params:
+            synth_EXAFS = self.build_synth_spectra(params)
+            mse = self.get_MSE_error(EXAFS_experiment, synth_EXAFS)
+            mse_list.append(mse)
+        return np.mean(mse_list), np.std(mse_list)
+
+    def objective(self, EXAFS_experiment, params):
+        # params are expected to be in the original scale
+        synth_EXAFS = self.build_synth_spectra(params)
+        mse = self.get_MSE_error(EXAFS_experiment, synth_EXAFS)
+        return mse
+
+    def compute_hessian(self, func, EXAFS_experiment, params, scale_factor=0.01, max_scale=1.0):
+        """
+        Compute the Hessian matrix of a scalar function with respect to its parameters.
+        'params' should be normalized parameters here. We'll scale them back to original units
+        before each function call.
+        """
+        n = len(params)
+        hessian = np.zeros((n, n))
+
+        for i in range(n):
+            for j in range(n):
+                # Compute step sizes in normalized space
+                epsilon_i = scale_factor * (abs(params[i]) if abs(params[i]) > 1e-8 else 1e-6)
+                epsilon_j = scale_factor * (abs(params[j]) if abs(params[j]) > 1e-8 else 1e-6)
+
+                # Create perturbed parameter sets in normalized space
+                params_ij = params.copy()
+                params_ip = params.copy()
+                params_jp = params.copy()
+
+                params_ij[i] += epsilon_i
+                params_ij[j] += epsilon_j
+                params_ip[i] += epsilon_i
+                params_jp[j] += epsilon_j
+
+                # Convert normalized parameters back to original scale before objective call
+                def denorm(pars):
+                    return [p * max_scale for p in pars]
+
+                f_ij = func(EXAFS_experiment, denorm(params_ij))
+                f_i = func(EXAFS_experiment, denorm(params_ip))
+                f_j = func(EXAFS_experiment, denorm(params_jp))
+                f_orig = func(EXAFS_experiment, denorm(params))
+
+                hessian[i, j] = (f_ij - f_i - f_j + f_orig) / (epsilon_i * epsilon_j)
+
+        return hessian
+
+    def get_MLP_uncertainty(self):
+        predictions = self.run_predictions()
+        self.mlp_uncertainties = []
+
+        for idx, pred in enumerate(predictions):
+            interpolated_chi_q = pred['interpolated_chi_q']
+            predicted_parameter_array = [
+                pred['predicted_a'], 
+                pred['predicted_deltar'], 
+                pred['predicted_sigma2'], 
+                pred['predicted_e0']
+            ]
+
+            # Normalize parameters
+            max_scale = max(abs(p) for p in predicted_parameter_array)
+            if max_scale < 1e-8:
+                max_scale = 1e-6
+            normalized_params = [p / max_scale for p in predicted_parameter_array]
+
+            #print("Normalized Parameters:", normalized_params)
+
+            # Compute Hessian in normalized space
+            normalized_hessian = self.compute_hessian(
+                self.objective, 
+                interpolated_chi_q, 
+                normalized_params, 
+                scale_factor=0.005, 
+                max_scale=max_scale
+            )
+
+            # The Hessian is currently in terms of normalized parameters.
+            # To convert back to the original parameters, multiply by (max_scale^2)
+            # because Hessian second derivatives scale as 1/(units_of_params^2).
+            hessian_rescaled = normalized_hessian * (max_scale ** 2)
+
+            # Regularize the Hessian for numerical stability
+            lambda_reg = 1e-6
+            regularized_hessian = hessian_rescaled + np.eye(len(hessian_rescaled)) * lambda_reg
+
+            # Compute covariance matrix (inverse of Hessian)
+            covariance_matrix = np.linalg.inv(regularized_hessian)
+
+            # Extract uncertainties as sqrt of diagonal of covariance
+            uncertainty = np.sqrt(np.diag(covariance_matrix))
+            self.mlp_uncertainties.append(uncertainty)
+
+            # Optional debugging
+            #condition_number = np.linalg.cond(regularized_hessian)
+            #print(f"Condition Number of Regularized Hessian (Prediction {idx}):", condition_number)
+            #condition_number = np.linalg.cond(normalized_hessian)
+            #print(f"Condition Number of Normalized Hessian (Prediction {idx}):", condition_number)
+        #print("Uncertainties:", uncertainties)
+
+
 
 
 class HistoryLogger(pl.Callback):

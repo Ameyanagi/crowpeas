@@ -134,7 +134,7 @@ def predict_and_denormalize(
     return denormalize_data(prediction, norm_params)
 
 
-def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict, n_samples: int=100):
+def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict, n_samples: int=10):
     device = model.device
     input_data = input_data.to(device)
 
