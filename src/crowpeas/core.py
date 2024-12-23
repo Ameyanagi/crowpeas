@@ -8,15 +8,19 @@ from typing import Sequence, Literal
 import json
 
 from .data_generator import SyntheticSpectrum
+from .data_generatorS import SyntheticSpectrumS
 from .data_loader import CrowPeasDataModule
+from .data_loader_NODE import CrowPeasDataModuleNODE
 import lightning as pl
 from .model.BNN import BNN
 from .model.MLP import MLP
 from .model.CNN import CNN
+from .model.NODE import NODE
 from .model.HetMLPNM import hetMLP
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
+from torchinfo import torchinfo
 
 from .utils import (
     normalize_data,
@@ -25,7 +29,9 @@ from .utils import (
     denormalize_spectra,
     interpolate_spectrum,
     predict_with_uncertainty,
-    predict_with_uncertainty_hetMLP
+    predict_with_uncertainty_hetMLP,
+    normalize_data_S,
+    normalize_spectra_S
 )
 from larch.xafs import xftf, xftr, feffpath, path2chi, ftwindow
 from larch.io import read_ascii
@@ -38,6 +44,8 @@ import matplotlib.cm as cm
 import plotext as plt_t
 
 from scipy.linalg import inv
+
+from .utils import create_random_series
 
 # from laplace import Laplace, marglik_training
 # from copy import deepcopy
@@ -67,7 +75,7 @@ class CrowPeas:
     model: pl.LightningModule
 
     # parameters related to neural network architecture
-    nn_type: Literal["MLP", "BNN", "hetMLP", "CNN"]
+    nn_type: Literal["MLP", "BNN", "hetMLP", "CNN", "NODE"]
     nn_activation: str
     nn_output_activation: str
     nn_output_dim: int
@@ -100,7 +108,7 @@ class CrowPeas:
     learning_rate: float
 
     # synthetic spectra for training
-    synthetic_spectra: SyntheticSpectrum
+    synthetic_spectra: SyntheticSpectrum | SyntheticSpectrumS
     data_loader: CrowPeasDataModule
     history: dict = {"train_loss": [], "val_loss": []}
 
@@ -327,6 +335,7 @@ class CrowPeas:
             )
 
         self.checkpoint_name = self.config["neural_network"]["checkpoint_name"]
+        #print("Checkpoint name: ", self.checkpoint_name)
 
         self.nn_type = self.config["neural_network"]["architecture"]["type"]
         self.nn_activation = self.config["neural_network"]["architecture"]["activation"]
@@ -616,6 +625,8 @@ class CrowPeas:
                 
             }
 
+        print(path)
+
         if path is not None:
             if path.endswith("toml"):
                 self.config_filename = path
@@ -638,6 +649,8 @@ class CrowPeas:
                 print("Saving config file")
                 print(self.config_dir)
                 print(self.output_dir)
+                self.config_filename = os.path.basename(self.config_filename) # if given a long path
+                print(self.config_filename)
                 save_path = os.path.join(self.config_dir, self.output_dir)
                 with open(save_path + "/" + self.config_filename, "w") as f:
                     toml.dump(self.config, f)
@@ -651,8 +664,29 @@ class CrowPeas:
 
         return self
 
+    # def init_synthetic_spectra(self, generate=True):
+    #     self.synthetic_spectra = SyntheticSpectrum(
+    #         feff_path_file=self.feff_path_file,
+    #         param_ranges=self.param_ranges,
+    #         training_mode=self.training_mode,
+    #         num_examples=self.num_examples,
+    #         k_weight=self.k_weight,
+    #         k_range=self.k_range,
+    #         spectrum_noise=self.spectrum_noise,
+    #         noise_range=self.noise_range,
+    #         seed=self.seed,
+    #         generate=generate,
+    #     )
+
+    #     if hasattr(self, "synthetic_spectra") and (
+    #         self.synthetic_spectra.k is not None
+    #     ):
+    #         self.nn_k_grid = self.synthetic_spectra.k
+
+    #     return self
+
     def init_synthetic_spectra(self, generate=True):
-        self.synthetic_spectra = SyntheticSpectrum(
+        self.synthetic_spectra = SyntheticSpectrumS(
             feff_path_file=self.feff_path_file,
             param_ranges=self.param_ranges,
             training_mode=self.training_mode,
@@ -704,24 +738,54 @@ class CrowPeas:
             seed = 42
         else:
             seed = self.seed
+       # check network type
+        if self.config["neural_network"]["architecture"]["type"].lower().startswith("node"):
 
-        # TODO: read normal_params
-        normalized_spectra, norm_spectra_params = normalize_spectra(
-            self.synthetic_spectra.spectra
-        )
-        normalized_parameters, norm_parameters_params = normalize_data(
-            self.synthetic_spectra.parameters
-        )
+            mask_bool = self.synthetic_spectra.masks.astype(bool)
+
+            normalized_spectra, norm_spectra_params = normalize_spectra_S(
+                self.synthetic_spectra.spectra, mask_bool
+            )
+            normalized_parameters, norm_parameters_params = normalize_data_S(
+                self.synthetic_spectra.parameters, mask_bool
+            )
+        else:
+
+            # TODO: read normal_params
+            normalized_spectra, norm_spectra_params = normalize_spectra(
+                self.synthetic_spectra.spectra
+            )
+            normalized_parameters, norm_parameters_params = normalize_data(
+                self.synthetic_spectra.parameters
+            )
 
         self.norm_params_spectra = norm_spectra_params
         self.norm_params_parameters = norm_parameters_params
 
-        self.data_loader = CrowPeasDataModule(
+
+
+        if self.config["neural_network"]["architecture"]["type"].lower().startswith("node"):
+            self.data_loader = CrowPeasDataModuleNODE(
+                spectra=normalized_spectra,
+                parameters=normalized_parameters,
+                masks=mask_bool,
+                random_seed=seed,
+                train_ratio=self.config.get("train_ratio", 0.8),
+                val_ratio=self.config.get("val_ratio", 0.1),
+                batch_size=self.batch_size,
+                num_workers=self.config.get("num_workers", 4),
+            )
+            self.data_loader.setup(stage=setup)
+
+        else:
+            self.data_loader = CrowPeasDataModule(
             spectra=normalized_spectra,
             parameters=normalized_parameters,
             random_seed=seed,
-        )
+            )
+
         self.data_loader.setup(setup)
+        print("DataLoader has been prepared.")
 
         return self
 
@@ -754,6 +818,10 @@ class CrowPeas:
             self.model = MLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
+        elif self.nn_type.lower().startswith("node"):
+            self.model = NODE.load_from_checkpoint(
+                os.path.join(self.checkpoint_dir, self.checkpoint_name)
+            )
         elif self.nn_type.lower().startswith("cnn"):
             self.model = CNN.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
@@ -782,6 +850,20 @@ class CrowPeas:
             )
         elif self.nn_type.lower().startswith("mlp"):
             self.model = MLP(
+                hidden_layers=self.nn_hidden_dims,
+                output_size=self.nn_output_dim,
+                input_form=self.input_type,
+                k_min=self.k_range[0],
+                k_max=self.k_range[1],
+                r_min=self.r_range[0],
+                r_max=self.r_range[1],
+                rmax_out=6,
+                window="kaiser",
+                dx=1,
+                activation=self.nn_activation,
+            )
+        elif self.nn_type.lower().startswith("node"):
+            self.model = NODE(
                 hidden_layers=self.nn_hidden_dims,
                 output_size=self.nn_output_dim,
                 input_form=self.input_type,
@@ -865,8 +947,10 @@ class CrowPeas:
         trainer = pl.Trainer(max_epochs=self.epochs, callbacks=callbacks)
         trainer.fit(
             self.model,
-            self.data_loader.train_dataloader(batch_size=self.batch_size),
-            self.data_loader.val_dataloader(batch_size=self.batch_size),
+            # self.data_loader.train_dataloader(batch_size=self.batch_size),
+            # self.data_loader.val_dataloader(batch_size=self.batch_size),
+            self.data_loader.train_dataloader(),
+            self.data_loader.val_dataloader(),
         )
 
         best_checkpoint = callback.best_model_path
@@ -968,19 +1052,29 @@ class CrowPeas:
 
         if not hasattr(self, "model") or self.model is None:
             self.load_model()
-
-        self.x_test, self.y_test = next(iter(self.data_loader.test_dataloader()))
+        network_type = self.config["neural_network"]["architecture"]["type"]
+        if network_type.lower().startswith("node"):
+            self.x_test, self.y_test, _ = next(iter(self.data_loader.test_dataloader()))
+        else:
+            self.x_test, self.y_test = next(iter(self.data_loader.test_dataloader()))
 
         self.model.eval()
 
+        self.node_test_pred_list = []
+
         with torch.no_grad():
-            self.test_pred = self.model(self.x_test.to(self.model.device))
+            if network_type.lower().startswith("node"):
+                self.test_pred = self.model(self.x_test.to(self.model.device))
+            else:
+                self.test_pred = self.model(self.x_test.to(self.model.device))
 
         if self.nn_type.lower().startswith("het"):
             self.test_pred_mu, self.test_pred_sigma = self.test_pred # test_pred is a tuple for hetMLP
             self.denormalized_x_test = self.denormalize_spectra(self.x_test)
             self.denormalized_y_test = self.denormalize_data(self.y_test)
             self.denormalized_test_pred = self.denormalize_data(self.test_pred_mu)
+        if self.nn_type.lower().startswith("node"):
+            print("node")
         else:
             self.denormalized_x_test = self.denormalize_spectra(self.x_test)
             self.denormalized_y_test = self.denormalize_data(self.y_test)
@@ -1031,6 +1125,75 @@ class CrowPeas:
             fig.savefig(save_path)
 
         return fig
+
+
+    def plot_parity2(self, save_path="/parity.png"):
+
+
+        # Construct full save path
+        save_path = os.path.join(self.config_dir, self.output_dir) + save_path
+
+        parameter_name_dict = {0: "A", 1: "deltar", 2: "sigma2", 3: "e0"}
+
+        # Extract test data and predictions
+        y_test_data = self.y_test  # Shape: (64, 20, 4)
+        print(f"y_test_data shape: {y_test_data.shape}")
+        y_pred_data = self.test_pred  # Shape: (64, 20, 4)
+        print(f"y_pred_data shape: {y_pred_data.shape}")
+
+        # Convert tensors to CPU numpy arrays if necessary
+        def to_cpu_numpy(data):
+            if isinstance(data, torch.Tensor):
+                return data.cpu().detach().numpy()
+            return data
+
+        def process_data(data):
+            # Convert to CPU numpy array
+            data_array = to_cpu_numpy(data)
+            # Flatten to [1280, 4]
+            if len(data_array.shape) == 3:  # Ensure it's [samples, sequences, parameters]
+                data_array = data_array.reshape(-1, data_array.shape[-1])  # Flatten to [samples * sequences, parameters]
+            return data_array
+
+        y_test_data = process_data(y_test_data)  # Shape: (1280, 4)
+        y_pred_data = process_data(y_pred_data)  # Shape: (1280, 4)
+
+        # Check for mismatched shapes
+        if y_test_data.shape != y_pred_data.shape:
+            print(f"Mismatched shapes: y_test_data {y_test_data.shape}, y_pred_data {y_pred_data.shape}")
+            return None
+
+        num_parameters = y_test_data.shape[1]
+        print(f"Plotting parity plot for {num_parameters} parameters.")
+        print(f"data size: {y_test_data.shape}, pred size: {y_pred_data.shape}")
+
+        # Plot predicted vs. true values for each parameter
+        fig, axs = plt.subplots(1, num_parameters, figsize=(5 * num_parameters, 5))
+        if num_parameters == 1:
+            axs = [axs]
+
+        for i in range(num_parameters):
+            x_data = y_test_data[:, i]
+            y_data = y_pred_data[:, i]
+
+            axs[i].scatter(x_data, y_data, alpha=0.5)
+            min_val = min(x_data.min(), y_data.min())
+            max_val = max(x_data.max(), y_data.max())
+            axs[i].plot([min_val, max_val], [min_val, max_val], "r--")
+            axs[i].set_xlabel("True Values")
+            axs[i].set_ylabel("Predicted Values")
+            param_name = parameter_name_dict.get(i, f"Param {i}")
+            axs[i].set_title(f"Parameter {param_name}: Predicted vs. True")
+
+        fig.tight_layout()
+
+        if save_path is not None:
+            fig.savefig(save_path)
+            print(f"Parity plot saved to {save_path}")
+
+        return fig
+
+
 
     def plot_test_spectra(self, index, save_path="/spectra.png"):
 
@@ -1157,6 +1320,78 @@ class CrowPeas:
 
         return interpolated_chi_k, interpolated_chi_q
 
+    def run_predictions_S(self):
+        dataset_dirs = self.config['experiment']['dataset_dir']
+        artemis_results = self.config['artemis']['result']
+        artemis_unc = self.config['artemis']['unc']
+        dataset_names = self.config['experiment']['dataset_names']
+        real_values = len(dataset_dirs)
+        self.sequenced_exp_spectra = np.zeros((1, 20, 401))
+
+        for i in range(len(dataset_dirs)):
+            dataset_dir = dataset_dirs[i]
+            interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir)) # this is the exp data in k and q
+            interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+
+            # Normalize the data
+            max_abs_val = self.norm_params_spectra["max_abs_val"]
+            normalized_chi_k = interpolated_chi_k / max_abs_val
+            
+            self.sequenced_exp_spectra[0, i] = normalized_chi_k
+        
+        #print(self.sequenced_exp_spectra)
+        #print(self.sequenced_exp_spectra.shape)
+
+        # Perform prediction
+        self.model.eval()
+        with torch.no_grad():
+            spectra_tensor = torch.tensor(self.sequenced_exp_spectra).to(self.model.device)
+            self.exp_pred = self.model(spectra_tensor)
+        
+        #print(self.exp_pred)
+        #print(self.exp_pred.shape)
+
+        # get the real values which are the first real_values elements
+        real_values = self.exp_pred[0][:real_values]
+        # denormalize
+        real_values = self.denormalize_data(real_values)
+        self.denormalized_test_pred = real_values
+    
+        #print(real_values)
+
+        self.predictions = []
+
+        for i in range(len(dataset_dirs)):
+            dataset_dir = dataset_dirs[i]
+            artemis_result = artemis_results[i]
+            artemis_unc_entry = artemis_unc[i]
+            dataset_name = dataset_names[i]
+            interpolated_chi_k, interpolated_chi_q = self.process_exp_data(self.load_exp_data(dataset_dir)) # this is the exp data in k and q
+            interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
+
+            predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[i]
+            a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
+
+            self.predictions.append({
+                'predicted_a': predicted_a,
+                'predicted_deltar': predicted_deltar,
+                'predicted_sigma2': predicted_sigma2,
+                'predicted_e0': predicted_e0,
+                'uncertainty_a': a_unc,
+                'uncertainty_deltar': deltar_unc,
+                'uncertainty_sigma2': sigma2_unc,
+                'uncertainty_e0': e0_unc,
+                'interpolated_chi_k': interpolated_chi_k,
+                'interpolated_chi_q': interpolated_chi_q,
+                'artemis_result': artemis_result,
+                'artemis_unc': artemis_unc_entry,
+                'dataset_name': dataset_name
+                })
+        #print(self.predictions)
+        
+
+        return self.predictions
+
     def run_predictions(self):
         network_type = self.config["neural_network"]["architecture"]["type"]
         dataset_dirs = self.config['experiment']['dataset_dir']
@@ -1188,6 +1423,11 @@ class CrowPeas:
                 a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
 
             if network_type == "MLP":
+                self.predict_and_denormalize(normalized_chi_k[0])
+                predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
+                a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
+
+            if network_type == "NODE":
                 self.predict_and_denormalize(normalized_chi_k[0])
                 predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
                 a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
@@ -1304,7 +1544,8 @@ class CrowPeas:
 
     def plot_results(self):
         dataset_names = self.config["experiment"]["dataset_names"]
-        predictions = self.run_predictions()
+        #predictions = self.run_predictions()
+        predictions = self.run_predictions_S()
         num_predictions = len(predictions)
         kmin = self.k_range[0]
         kmax = self.k_range[1]
@@ -1322,7 +1563,7 @@ class CrowPeas:
         max_artemis = np.max(all_artemis, axis=0)
 
         network_type = self.config["neural_network"]["architecture"]["type"]
-        if network_type == "MLP":
+        if network_type == "MLP" or network_type == "NODE":
             self.get_MLP_uncertainty()
             for idx,pred in enumerate(predictions):
                 pred['uncertainty_a'], pred['uncertainty_deltar'], pred['uncertainty_sigma2'], pred['uncertainty_e0'] = self.mlp_uncertainties[idx]
@@ -1529,7 +1770,8 @@ class CrowPeas:
         return hessian
 
     def get_MLP_uncertainty(self):
-        predictions = self.run_predictions()
+        #predictions = self.run_predictions()
+        predictions = self.run_predictions_S()
         self.mlp_uncertainties = []
 
         for idx, pred in enumerate(predictions):
@@ -1582,6 +1824,222 @@ class CrowPeas:
         #print("Uncertainties:", uncertainties)
 
 
+    def model_summary(self):
+        model_summary = torchinfo.summary(self.model, 
+                                    input_size=(1, 4096),  # Batch size 1, input dim 4096
+                                    verbose=2,
+                                    col_names=["input_size", "output_size", "num_params", "kernel_size"],
+                                    row_settings=["var_names"])
+        print(model_summary)
+
+    def print_model_info(self):
+        # 1. Detailed model summary
+        model_summary = torchinfo.summary(
+            self.model,
+            input_size=(1, 4096),
+            depth=10,  # Increase depth to show nested layers
+            verbose=2,
+            col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"],
+            row_settings=["var_names", "depth"]
+        )
+        print(model_summary)
+        
+        # 2. Print model architecture
+        print("\nModel Architecture:")
+        print(self.model)
+        
+        # 3. Add shape tracking hooks
+        def hook_fn(module, input, output):
+            print(f"\n{module.__class__.__name__}")
+            print(f"Input shape: {input[0].shape}")
+            print(f"Output shape: {output.shape}")
+        
+        # Register hooks for all layers
+        for name, layer in self.model.named_modules():
+            if hasattr(layer, 'weight'):
+                layer.register_forward_hook(hook_fn)
+                
+        # 4. Run test forward pass
+        print("\nForward Pass Shape Tracking:")
+        with torch.no_grad():
+            test_input = torch.randn(1, 4096)
+            _ = self.model(test_input)
+
+    def print_training_example(self):
+        # # Print a single training example
+        # x_train, y_train, _ = next(iter(self.data_loader.train_dataloader()))
+        # print("Training Example:")
+        # print("Input Shape:", len(x_train))
+        # print("Output Shape:", len(y_train))
+        # print("Input Data:")
+        # print("Input index 0", x_train[0])
+        # print("Input index 0 rows with all zeros")
+        # count = 0
+        # for i in range(20):
+        #     if x_train[0][i].sum() == 0:
+        #         count += 1
+        # print("count", count)
+        # print("length of Input index 0", len(x_train[0]))
+        # print("Output Data:")
+        # print("Output index 0", y_train[0])
+        # print("Output index 0 rows with all zeros")
+        # count = 0
+        # for i in range(20):
+        #     if y_train[0][i].sum() == 0:
+        #         count += 1
+        # print("count", count)
+        # print("length of Output index 0", len(y_train[0]))
+        
+        # plot_x_data = x_train[0].detach().cpu().numpy()[:20-count, :]
+        # plt_y_data = y_train[0].detach().cpu().numpy()[:20-count, :]
+
+        # plt_y_data_param_0 = plt_y_data[:, 0]
+        # plt_y_data_param_1 = plt_y_data[:, 1]
+        # plt_y_data_param_2 = plt_y_data[:, 2]
+        # plt_y_data_param_3 = plt_y_data[:, 3]
+
+        # print(f"Plotting Training Example: {plot_x_data.shape}, {plt_y_data.shape}")
+
+        # print raw synthetic data
+        mask_bool = self.synthetic_spectra.masks[0].astype(bool)
+        #print(self.synthetic_spectra.spectra[0])
+        print(self.synthetic_spectra.spectra[0][mask_bool].shape)
+        print(self.synthetic_spectra.parameters[0][mask_bool].shape)
+
+        plot_x_data = self.synthetic_spectra.spectra[0][mask_bool]
+        plt_y_data = self.synthetic_spectra.parameters[0][mask_bool]
+
+        plt_y_data_param_0 = plt_y_data[:, 0]
+        plt_y_data_param_1 = plt_y_data[:, 1]
+        plt_y_data_param_2 = plt_y_data[:, 2]
+        plt_y_data_param_3 = plt_y_data[:, 3]
+
+        fig = plt.figure(figsize=(15, 5))
+        gs = gridspec.GridSpec(1, 8)  # Create 8 columns to work with
+
+        # First subplot takes 4 columns
+        ax0 = plt.subplot(gs[0, 0:4])
+        for spectrum in plot_x_data:
+            ax0.plot(spectrum)
+        ax0.set_title("Input Spectra")
+        ax0.set_xlabel("k")
+        ax0.set_ylabel("Intensity")
+
+        # Remaining subplots take 1 column each
+        ax1 = plt.subplot(gs[0, 4])
+        ax1.plot(plt_y_data_param_0)
+        ax1.set_title("Parameter 0")
+        ax1.set_xlabel("Spectra Index")
+        ax1.set_ylabel("Value")
+
+        ax2 = plt.subplot(gs[0, 5])
+        ax2.plot(plt_y_data_param_1)
+        ax2.set_title("Parameter 1")
+        ax2.set_xlabel("Spectra Index")
+        ax2.set_ylabel("Value")
+
+        ax3 = plt.subplot(gs[0, 6])
+        ax3.plot(plt_y_data_param_2)
+        ax3.set_title("Parameter 2")
+        ax3.set_xlabel("Spectra Index")
+        ax3.set_ylabel("Value")
+
+        ax4 = plt.subplot(gs[0, 7])
+        ax4.plot(plt_y_data_param_3)
+        ax4.set_title("Parameter 3")
+        ax4.set_xlabel("Spectra Index")
+        ax4.set_ylabel("Value")
+
+        plt.tight_layout()
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/training_example.png"
+        plt.savefig(save_path)
+
+        
+    def print_seq_example(self):
+        example_index = 9
+        # print raw synthetic data
+        mask_bool = self.synthetic_spectra.masks[example_index].astype(bool)
+        #print(self.synthetic_spectra.spectra[0])
+        print(self.synthetic_spectra.spectra[0][mask_bool].shape)
+        print(self.synthetic_spectra.parameters[0][mask_bool].shape)
+
+        
+
+        plot_x_data = self.synthetic_spectra.spectra[example_index][mask_bool]
+        plt_y_data = self.synthetic_spectra.parameters[example_index][mask_bool]
+
+        plt_y_data_param_0 = plt_y_data[:, 0]
+        plt_y_data_param_1 = plt_y_data[:, 1]
+        plt_y_data_param_2 = plt_y_data[:, 2]
+        plt_y_data_param_3 = plt_y_data[:, 3]
+
+        # get predictions
+        normalized_x_data, _ = normalize_spectra(plot_x_data, self.norm_params_spectra)
+        normalized_x_data = torch.tensor(normalized_x_data)
+        with torch.no_grad():
+            predictions = self.model(normalized_x_data.to(self.model.device))
+        predictions = predictions.cpu().numpy()
+        predictions = denormalize_data(predictions, self.norm_params_parameters)
+
+        plt_y_data_param_0_pred = predictions[:, 0]
+        plt_y_data_param_1_pred = predictions[:, 1]
+        plt_y_data_param_2_pred = predictions[:, 2]
+        plt_y_data_param_3_pred = predictions[:, 3]
+
+
+        fig = plt.figure(figsize=(15, 5))
+        gs = gridspec.GridSpec(1, 8)  # Create 8 columns to work with
+
+        # First subplot takes 4 columns
+        ax0 = plt.subplot(gs[0, 0:4])
+        for spectrum in plot_x_data:
+            ax0.plot(spectrum)
+        ax0.set_title("Input Spectra")
+        ax0.set_xlabel("k (Å$^{-1}$)")
+        ax0.set_ylabel("$\chi$(k)*k^2")
+
+        # Remaining subplots take 1 column each
+        ax1 = plt.subplot(gs[0, 4])
+        ax1.plot(plt_y_data_param_0, label='True')
+        ax1.plot(plt_y_data_param_0_pred, label='Predicted', linestyle='--', color='red')
+        ax1.set_ylim([5, 12])
+        ax1.set_title("A")
+        ax1.set_xlabel("Spectra Index")
+        ax1.set_ylabel("Value")
+        ax1.legend(fontsize=7)
+
+        ax2 = plt.subplot(gs[0, 5])
+        ax2.plot(plt_y_data_param_1, label='True')
+        ax2.plot(plt_y_data_param_1_pred, label='Predicted', linestyle='--', color='red')
+        ax2.set_ylim([-0.2, 0.2])
+        ax2.set_title("$\Delta R$")
+        ax2.set_xlabel("Spectra Index")
+        ax2.set_ylabel("Value")
+        ax2.legend(fontsize=7)
+
+        ax3 = plt.subplot(gs[0, 6])
+        ax3.plot(plt_y_data_param_2, label='True')
+        ax3.plot(plt_y_data_param_2_pred, label='Predicted', linestyle='--', color='red')
+        ax3.set_ylim([0.003, 0.02])
+        ax3.set_title("$\sigma^2$")
+        ax3.set_xlabel("Spectra Index")
+        ax3.set_ylabel("Value")
+        ax3.legend(fontsize=7)
+
+        ax4 = plt.subplot(gs[0, 7])
+        ax4.plot(plt_y_data_param_3, label='True')
+        ax4.plot(plt_y_data_param_3_pred, label='Predicted', linestyle='--', color='red')
+        ax4.set_ylim([-10, 10])
+        ax4.set_title("$E_0$")
+        ax4.set_xlabel("Spectra Index")
+        ax4.set_ylabel("Value")
+        ax4.legend(fontsize=7)
+
+        plt.tight_layout()
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/training_example.png"
+        plt.savefig(save_path, dpi=300)
+
+
 
 
 class HistoryLogger(pl.Callback):
@@ -1590,312 +2048,10 @@ class HistoryLogger(pl.Callback):
         self.history = history
         
     def on_train_epoch_end(self, trainer, pl_module):
-        self.history["train_loss"].append(trainer.callback_metrics["train/loss"].item())
+        self.history["train_loss"].append(trainer.callback_metrics["train_loss"].item())
         
     def on_validation_epoch_end(self, trainer, pl_module):
-        self.history["val_loss"].append(trainer.callback_metrics["val/loss"].item())
-
-
-    # def plot_results(self):
-    #     dataset_names = self.config["experiment"]["dataset_names"]
-    #     predictions = self.run_predictions()
-    #     num_predictions = len(predictions)
-
-    #     # ============================
-    #     # Plot Parameters
-    #     # ============================
-    #     num_param_plots = 4
-    #     fig_params, axs_params = plt.subplots(1, num_param_plots, figsize=(20, 4))
-
-    #     # find min and max artimis values
-    #     all_artemis = [pred['artemis_result'] for pred in predictions]
-    #     all_artemis = np.array(all_artemis)
-    #     min_artemis = np.min(all_artemis, axis=0)
-    #     max_artemis = np.max(all_artemis, axis=0)
-
-    #     for pred in predictions:
-    #         # Plot Delta A
-    #         axs_params[0].errorbar(
-    #             pred['predicted_a'], pred['artemis_result'][0],
-    #             xerr=0, yerr=pred['artemis_unc'][0],
-    #             fmt='o', label='Predicted', color='red'
-    #         )
-    #         axs_params[0].plot(
-    #             [min_artemis[0]-1, max_artemis[0]+1],
-    #             [min_artemis[0]-1, max_artemis[0]+1],
-    #             'r--'
-    #         )
-    #         axs_params[0].set_title('Delta A')
-    #         axs_params[0].set_xlabel('NN')
-    #         axs_params[0].set_ylabel('Artemis')
-    #         axs_params[0].tick_params(axis='both', which='major', labelsize=8)
-
-    #         # Plot Delta R
-    #         axs_params[1].errorbar(
-    #             pred['predicted_deltar'], pred['artemis_result'][1],
-    #             xerr=0, yerr=pred['artemis_unc'][1],
-    #             fmt='o', label='Predicted', color='red'
-    #         )
-    #         axs_params[1].plot(
-    #             [min_artemis[1]-0.1, max_artemis[1]+0.1],
-    #             [min_artemis[1]-0.1, max_artemis[1]+0.1],
-    #             'r--'
-    #         )
-    #         axs_params[1].set_title('Delta R')
-    #         axs_params[1].set_xlabel('NN')
-    #         axs_params[1].set_ylabel('Artemis')
-    #         axs_params[1].tick_params(axis='both', which='major', labelsize=8)
-
-    #         # Plot Sigma2
-    #         axs_params[2].errorbar(
-    #             pred['predicted_sigma2'], pred['artemis_result'][2],
-    #             xerr=0, yerr=pred['artemis_unc'][2],
-    #             fmt='o', label='Predicted', color='red'
-    #         )
-    #         axs_params[2].plot(
-    #             [min_artemis[2]-0.01, max_artemis[2]+0.01],
-    #             [min_artemis[2]-0.01, max_artemis[2]+0.01],
-    #             'r--'
-    #         )
-    #         axs_params[2].set_title('Sigma2')
-    #         axs_params[2].set_xlabel('NN')
-    #         axs_params[2].set_ylabel('Artemis')
-    #         axs_params[2].tick_params(axis='both', which='major', labelsize=8)
-
-    #         # Plot E0
-    #         axs_params[3].errorbar(
-    #             pred['predicted_e0'], pred['artemis_result'][3],
-    #             xerr=0, yerr=pred['artemis_unc'][3],
-    #             fmt='o', label='Predicted', color='red'
-    #         )
-    #         axs_params[3].plot(
-    #             [-10, 10], [-10, 10], 'r--'
-    #         )
-    #         axs_params[3].set_title('E0')
-    #         axs_params[3].set_xlabel('NN')
-    #         axs_params[3].set_ylabel('Artemis')
-    #         axs_params[3].tick_params(axis='both', which='major', labelsize=8)
-
-    #     plt.tight_layout()
-    #     plt.savefig('parameters.png')
-    #     plt.close(fig_params)  # Close the figure to free memory
-
-    #     # ============================
-    #     # Plot Q-space
-    #     # ============================
-    #     # Determine grid size based on number of predictions
-    #     cols_q = 3  # Number of columns in the grid
-    #     rows_q = math.ceil(num_predictions / cols_q)
-
-    #     fig_q, axs_q = plt.subplots(rows_q, cols_q, figsize=(5 * cols_q, 4 * rows_q))
-    #     axs_q = axs_q.flatten() if num_predictions > 1 else [axs_q]
-
-    #     for idx, pred in enumerate(predictions):
-    #         ax = axs_q[idx]
-    #         k_grid = self.config["neural_network"]["k_grid"]
-    #         k_grid = np.array(k_grid, dtype=np.float32) # TODO fix this
-
-    #         interpolated_chi_q = pred['interpolated_chi_q']
-    #         interpolated_artemis = self.build_synth_spectra(pred['artemis_result'])
-
-    #         mse_error = self.get_MSE_error(interpolated_chi_q, interpolated_artemis)
-
-    #         ax.plot(k_grid, interpolated_chi_q, label='Experimental', color='black')
-    #         ax.plot(
-    #             k_grid, interpolated_artemis,
-    #             label=f'Artemis MSE = {mse_error:.3f}', color='blue'
-    #         )
-    #         ax.set_xlim(2, 14)
-    #         ax.set_title(f'Q-space Prediction {idx + 1}')
-    #         ax.legend()
-    #         ax.set_xlabel('k')
-    #         ax.set_ylabel('Chi Q')
-    #         ax.tick_params(axis='both', which='major', labelsize=8)
-
-    #     # Remove any unused subplots
-    #     for idx in range(num_predictions, rows_q * cols_q):
-    #         fig_q.delaxes(axs_q[idx])
-
-    #     plt.tight_layout()
-    #     plt.savefig('qspace.png')
-    #     plt.close(fig_q) 
-
-
-
-    # def predict_on_experimental_data(self):
-
-    #     network_type = self.config["neural_network"]["architecture"]["type"]
-    #     krange = self.config["experiment"]["k_range"]
-    #     kmin = krange[0]
-    #     kmax = krange[1]
-    #     r_range = self.config["experiment"]["r_range"]
-    #     rmin = r_range[0]
-    #     rmax = r_range[1]
-
-    #     k_grid = self.config["neural_network"]["k_grid"] # this is actually a list of strings #TODO: make sure this is not an issue elsewhere in the code
-    #     k_grid = np.array(k_grid, dtype=np.float32)
-    #     k_weight = self.config["experiment"]["k_weight"]
-
-    #     exp_data_path = self.config["experiment"]["dataset_dir"]
-    #     pt_data  = read_ascii(exp_data_path)
-
-    #     if k_weight == 2:
-    #         pt_data.chi2 = pt_data.chi*pt_data.k**2
-
-    #     interpolated_chi_k = interpolate_spectrum(pt_data.k, pt_data.chi2, k_grid)
-    #     interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
-    #     xftf(pt_data, kweight=k_weight, kmin=kmin, kmax=kmax)
-    #     xftr(pt_data, rmin=rmin, rmax=rmax)
-    #     interpolated_chi_q = interpolate_spectrum(pt_data.q, pt_data.chiq_re, k_grid)
-
-
-    #     artemis_results = self.config["artemis"]["result"]
-    #     artemis_unc = self.config["artemis"]["unc"]
-
-    #     if network_type == "BNN":
-    #         self.predict_and_denormalize_BNN(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
-    #         preds, uncs = self.denormalized_test_pred
-    #         predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = preds
-    #         a_unc, deltar_unc, sigma2_unc, e0_unc = uncs
-
-    #     if network_type == "MLP":
-    #         self.predict_and_denormalize(interpolated_chi_k/self.norm_params_spectra["max_abs_val"])
-    #         predicted_a, predicted_deltar, predicted_sigma2, predicted_e0 = self.denormalized_test_pred[0]
-    #         a_unc, deltar_unc, sigma2_unc, e0_unc = [0,0,0,0]
-
-
-    #     path_predicted = feffpath(self.feff_path_file)
-    #     path_predicted.s02 = 1
-    #     path_predicted.degen = predicted_a
-    #     path_predicted.deltar = predicted_deltar
-    #     path_predicted.sigma2 = predicted_sigma2
-    #     path_predicted.e0 = predicted_e0
-    #     path2chi(path_predicted)
-    #     xftf(path_predicted, kweight=k_weight, kmin=kmin, kmax=kmax)
-    #     xftr(path_predicted, rmin=rmin, rmax=rmax)
-
-    #     interpolated_predicted = interpolate_spectrum(path_predicted.q, path_predicted.chiq_re, k_grid)
-
-    #     artemis_results = self.config["artemis"]["result"]
-    #     artemis_unc = self.config["artemis"]["unc"]
-
-    #     artemis_a = self.config["artemis"]["result"][0]
-    #     artemis_deltar = self.config["artemis"]["result"][1]
-    #     artemis_sigma2 = self.config["artemis"]["result"][2]
-    #     artemis_e0 = self.config["artemis"]["result"][3]
-    
-
-    #     path_artemis = feffpath(self.feff_path_file)
-    #     path_artemis.s02 = 1
-    #     path_artemis.degen = artemis_a
-    #     path_artemis.deltar = artemis_deltar
-    #     path_artemis.sigma2 = artemis_sigma2
-    #     path_artemis.e0 = artemis_e0
-    #     path2chi(path_artemis)
-    #     xftf(path_artemis, kweight=k_weight, kmin=kmin, kmax=kmax)
-    #     xftr(path_artemis, rmin=rmin, rmax=rmax)
-
-    #     interpolated_artemis = interpolate_spectrum(path_artemis.q, path_artemis.chiq_re, k_grid)
-
-    #     self.exp_prediction = {
-    #         "predicted_a": predicted_a,
-    #         "predicted_deltar": predicted_deltar,
-    #         "predicted_sigma2": predicted_sigma2,
-    #         "predicted_e0": predicted_e0,
-    #         "interpolated_chi_k": interpolated_chi_k,
-    #         "interpolated_chi_q": interpolated_chi_q,
-    #         "interpolated_predicted": interpolated_predicted,
-    #         "interpolated_artemis": interpolated_artemis
-    #     }
-
-    #     def get_MSE_error(interpolated_artemis, interpolated_exp, k_grid, krange):
-            
-    #         kmin = krange[0]
-    #         kmax = krange[1]
-
-    #         # get exp in range
-    #         interpolated_exp_in_range = [i[1] for i in zip(k_grid, interpolated_exp) if kmin <= i[0] <= kmax]
-    #         interpolated_exp_in_range = np.array(interpolated_exp_in_range)
-
-    #         # MSE error between predicted and artemis with nano
-    #         interpolated_artemis_in_range = [i[1] for i in zip(k_grid, interpolated_artemis) if kmin <= i[0] <= kmax]
-    #         interpolated_artemis_in_range = np.array(interpolated_artemis_in_range)
-
-    #         e2 = np.mean((interpolated_artemis_in_range - interpolated_exp_in_range)**2)
-
-    #         return e2
-        
-    #     mse_artemis = get_MSE_error(interpolated_artemis, interpolated_chi_q, k_grid, krange)
-        
-    #     # Define the overall figure
-    #     fig = plt.figure(figsize=(10, 5))
-
-    #     # Create a grid with 2 rows and 3 columns, with the last column being used for the single plot
-    #     gs = gridspec.GridSpec(2, 3, width_ratios=[1, 1, 2])
-
-    #     # First 2x2 grid for the subplots 1-4
-    #     ax1 = fig.add_subplot(gs[0, 0])
-    #     ax2 = fig.add_subplot(gs[0, 1])
-    #     ax3 = fig.add_subplot(gs[1, 0])
-    #     ax4 = fig.add_subplot(gs[1, 1])
-
-    #     # The fifth plot occupying the third column
-    #     ax5 = fig.add_subplot(gs[:, 2])
-
-    #     # Plot the first four subplots in a 2x2 grid
-    #     ax1.errorbar(predicted_a, artemis_results[0], xerr=a_unc, yerr=artemis_unc[0], fmt='o', label='Predicted', color='red')
-    #     ax1.plot([artemis_results[0]-2, artemis_results[0]+2], [artemis_results[0]-2, artemis_results[0]+2], 'r--')
-    #     #ax1.set_xlim(8, 10)
-    #     #ax1.set_ylim(8, 10)
-    #     ax1.set_title('A')
-    #     ax1.set_xlabel('NN')
-    #     ax1.set_ylabel('Artemis')
-    #     # change tick font size
-    #     ax1.tick_params(axis='both', which='major', labelsize=8)
-
-
-    #     ax2.errorbar(predicted_deltar, artemis_results[1], xerr=deltar_unc, yerr=artemis_unc[1], fmt='o', label='Predicted', color='red')
-    #     ax2.plot([artemis_results[1]-0.1, artemis_results[1]+0.1], [artemis_results[1]-0.1, artemis_results[1]+0.1], 'r--')
-    #     #ax2.set_xlim(-0.02, 0)
-    #     #ax2.set_ylim(-0.02, 0)
-    #     ax2.set_title('Delta R')
-    #     ax2.set_xlabel('NN')
-    #     ax2.set_ylabel('Artemis')
-    #     ax2.tick_params(axis='both', which='major', labelsize=8)
-
-    #     ax3.errorbar(predicted_sigma2, artemis_results[2], xerr=sigma2_unc, yerr=artemis_unc[2], fmt='o', label='Predicted', color='red')
-    #     ax3.plot([artemis_results[2]-0.02, artemis_results[2]+0.02], [artemis_results[2]-0.02, artemis_results[2]+0.02], 'r--')
-    #     #ax3.set_xlim(0.003, 0.005)
-    #     #ax3.set_ylim(0.003, 0.005)
-    #     ax3.set_title('Sigma2')
-    #     ax3.set_xlabel('NN')
-    #     ax3.set_ylabel('Artemis')
-    #     ax3.tick_params(axis='both', which='major', labelsize=8)
-
-    #     ax4.errorbar(predicted_e0, artemis_results[3], xerr=e0_unc, yerr=artemis_unc[3], fmt='o', label='Predicted', color='red')
-    #     ax4.plot([-10, 10], [-10, 10], 'r--')
-    #     #ax4.set_xlim(-10, 10)
-    #     #ax4.set_ylim(-10, 10)
-    #     ax4.set_title('enot')
-    #     ax4.set_xlabel('NN')
-    #     ax4.set_ylabel('Artemis')
-    #     ax4.tick_params(axis='both', which='major', labelsize=8)
-
-    #     # Plot the fifth subplot
-    #     ax5.plot(k_grid, interpolated_chi_q, label='Experimental', color='black')
-    #     ax5.plot(k_grid, interpolated_artemis, label=f'Artemis MSE = {mse_artemis:.3f}', color='blue')
-    #     ax5.set_xlim(2, 14)
-    #     ax5.set_title('Q-space')
-    #     ax5.legend()
-
-    #     # Adjust layout
-    #     plt.tight_layout()
-    #     plt.savefig('exp_agreement.png')
-
-    #     return print(f"{predicted_a=}, {predicted_deltar=}, {predicted_sigma2=}, {predicted_e0=}")
-
-
-
+        self.history["val_loss"].append(trainer.callback_metrics["val_loss"].item())
 
     def plot_chi(self, dataset_dir):
         data = read_ascii(dataset_dir)
@@ -1935,83 +2091,45 @@ class HistoryLogger(pl.Callback):
 
 
 
-    # def fit_laplace(self):
-    #     if not hasattr(self, "synthetic_spectra") or self.synthetic_spectra is None:
-    #         self.load_synthetic_spectra()
-    #
-    #     if not hasattr(self, "data_loader") or self.data_loader is None:
-    #         self.prepare_dataloader()
-    #
-    #     if not hasattr(self, "model") or self.model is None:
-    #         self.load_model()
-    #
-    #     la_model = deepcopy(self.model)
-    #
-    #     la = Laplace(
-    #         la_model,
-    #         "regression",
-    #         subset_of_weights="last_layer",
-    #         hessian_structure="diag",
-    #     )
-    #
-    #     la.fit(self.data_loader.train_dataloader(batch_size=self.batch_size))
-    #     print("fit finished")
-    #
-    #     la.optimize_prior_precision("glm")
-    #     print("optimize_prior_precision")
-    #
-    #     la.fit(self.data_loader.train_dataloader(batch_size=self.batch_size))
-    #
-    #     x_test, y_test = next(iter(self.data_loader.test_dataloader()))
-    #
-    #     f_mu, f_var = la(x_test.to(device=self.model.device))
-    #
-    #     f_mu = f_mu.squeeze().detach().cpu().numpy()
-    #
-    #     f_sigma = f_var.squeeze().detach().cpu().numpy()
-    #
-    #     pred_std = np.sqrt(f_sigma**2)
-    #
-    #     denormalize_data = self.denormalize_data(f_mu)
-    #     denormalize_std = self.denormalize_data(pred_std)
-    #     denormalize_true = self.denormalize_data(y_test)
-    #
-    #     for data, std, true in zip(denormalize_data, denormalize_std, denormalize_true):
-    #         print(f"Predicted: {data}")
-    #         print(f"Predicted std: {std}")
-    #         print(f"True: {true}")
-    #
-    #         print()
-    #     #
-    #     # print(pred_std.shape)
-    #     #
-    #     # print()
-    #     #
-    #     # print(la.sigma_noise.item())
-    #
 
 
-# def main():
-#
-#     path = "./examples/training.toml"
-#     crowpeas = CrowPeas()
-#     # (
-#     #     crowpeas.load_config(path)
-#     #     .load_and_validate_config()
-#     #     .init_synthetic_spectra()
-#     #     .save_training_data()
-#     #     .save_config(path)
-#     # )
-#     #
-#     (
-#         crowpeas.load_config(path)
-#         .load_and_validate_config()
-#         .load_synthetic_spectra()
-#         .prepare_dataloader()
-#         .save_config(path)
-#         .train()
-#     )
-#
-#
-# if __name__ == "__main__":
-#     main()
+def main():
+
+    path = "/home/nick/Projects/crowpeas/tests/read_seq/training10k_qspace.toml"
+    print(path)
+    crowpeas = CrowPeas()
+    # (
+    #     crowpeas.load_config(path)
+    #     .load_and_validate_config()
+    #     .init_synthetic_spectra()
+    #     .save_training_data()
+    #     .save_config(path)
+    # )
+    #
+    (
+        crowpeas.load_config(path)
+        .load_and_validate_config()
+        #.init_synthetic_spectra()
+        #.save_training_data()
+        .save_config()
+        .load_synthetic_spectra()
+        #.prepare_dataloader()
+        #.save_config()
+
+        #.train() # training
+        .load_model()
+        #.print_model_info()
+
+        #.validate_model()
+        
+        #.run_predictions_S()
+        #.plot_results()
+    )
+    #crowpeas.print_training_example()
+    crowpeas.print_seq_example()
+    #crowpeas.plot_parity2()
+    #crowpeas.plot_training_history()
+    #crowpeas.plot_results()
+
+if __name__ == "__main__":
+    main()
