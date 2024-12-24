@@ -416,3 +416,49 @@ class SyntheticSpectrumS:
                                 step_params["sigma2"], step_params["e0"]])
                                 
         return np.array(sequence_spectra), np.array(sequence_params)
+
+    def _add_glitches(self, spectrum, n_glitches, height_range=(0.5, 0.7)):
+        """Helper method to add glitches to a spectrum"""
+        max_height = np.max(np.abs(spectrum))
+        glitched_spectrum = spectrum.copy()
+        
+        # Get random positions (ensure they're different)
+        positions = np.random.choice(len(spectrum), size=n_glitches, replace=False)
+        
+        # Add glitches
+        for pos in positions:
+            height = random.uniform(height_range[0], height_range[1]) * max_height
+            glitched_spectrum[pos] = height if random.random() > 0.5 else -height
+            
+        return glitched_spectrum
+
+    def generate_glitched_sequence(
+        self,
+        feff_path_file,
+        sequence_length,
+        parameter_profiles,    # Dict of {param: (start, end, profile_type)}
+        n_glitches=3,         # Number of glitches per spectrum
+        glitch_height=(0.5, 0.7), # Range for glitch heights as fraction of max
+        fixed_parameters=None  # Dict of {param: value} for constant params
+    ):
+        """Generate sequence with random glitches for testing robustness"""
+        
+        # Generate base sequence
+        sequence_spectra, sequence_params = self.generate_one_sequence(
+            feff_path_file,
+            sequence_length,
+            parameter_profiles,
+            fixed_parameters
+        )
+        
+        # Add glitches to each spectrum
+        glitched_spectra = []
+        for spectrum in sequence_spectra:
+            glitched_spectrum = self._add_glitches(
+                spectrum,
+                n_glitches,
+                glitch_height
+            )
+            glitched_spectra.append(glitched_spectrum)
+            
+        return np.array(glitched_spectra), sequence_params

@@ -1966,10 +1966,15 @@ class CrowPeas:
         vary_dict = {"degen": (5,12,"quadratic"), "deltar": (-0.2,0.2,"quadratic"), "sigma2": (0.02,0.003,"quadratic"), "e0": (-10,10,"quadratic")}
         const_dict = {"s02": 1}
 
-        novo_seq, novo_params = self.synthetic_spectra.generate_one_sequence(feff_path_file=self.feff_path_file,
+        # novo_seq, novo_params = self.synthetic_spectra.generate_one_sequence(feff_path_file=self.feff_path_file,
+        # sequence_length=20,
+        # parameter_profiles=vary_dict,
+        # fixed_parameters=const_dict)
+        novo_seq, novo_params = self.synthetic_spectra.generate_glitched_sequence(feff_path_file=self.feff_path_file,
         sequence_length=20,
         parameter_profiles=vary_dict,
-        fixed_parameters=const_dict)
+        fixed_parameters=const_dict,
+        n_glitches=20)
 
         print(novo_seq.shape)
         print(novo_params.shape)
