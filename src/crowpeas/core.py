@@ -1963,15 +1963,29 @@ class CrowPeas:
         print(self.synthetic_spectra.spectra[0][mask_bool].shape)
         print(self.synthetic_spectra.parameters[0][mask_bool].shape)
 
-        
+        vary_dict = {"degen": (5,12,"quadratic"), "deltar": (-0.2,0.2,"quadratic"), "sigma2": (0.02,0.003,"quadratic"), "e0": (-10,10,"quadratic")}
+        const_dict = {"s02": 1}
 
-        plot_x_data = self.synthetic_spectra.spectra[example_index][mask_bool]
-        plt_y_data = self.synthetic_spectra.parameters[example_index][mask_bool]
+        novo_seq, novo_params = self.synthetic_spectra.generate_one_sequence(feff_path_file=self.feff_path_file,
+        sequence_length=20,
+        parameter_profiles=vary_dict,
+        fixed_parameters=const_dict)
+
+        print(novo_seq.shape)
+        print(novo_params.shape)
+
+        #plot_x_data = self.synthetic_spectra.spectra[example_index][mask_bool]
+        #plt_y_data = self.synthetic_spectra.parameters[example_index][mask_bool]
+
+        plot_x_data = novo_seq
+        plt_y_data = novo_params
 
         plt_y_data_param_0 = plt_y_data[:, 0]
         plt_y_data_param_1 = plt_y_data[:, 1]
         plt_y_data_param_2 = plt_y_data[:, 2]
         plt_y_data_param_3 = plt_y_data[:, 3]
+
+        print(plt_y_data_param_0)
 
         # get predictions
         normalized_x_data, _ = normalize_spectra(plot_x_data, self.norm_params_spectra)
@@ -1986,6 +2000,7 @@ class CrowPeas:
         plt_y_data_param_2_pred = predictions[:, 2]
         plt_y_data_param_3_pred = predictions[:, 3]
 
+        print(plt_y_data_param_0_pred)
 
         fig = plt.figure(figsize=(15, 5))
         gs = gridspec.GridSpec(1, 8)  # Create 8 columns to work with

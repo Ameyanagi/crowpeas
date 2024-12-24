@@ -89,180 +89,6 @@ class SyntheticSpectrumS:
 
         return path1.s02 * path1.degen, path1.deltar, path1.sigma2, path1.e0
 
-    # def generate_training_examples(
-    #     self, 
-    #     feff_path_file, 
-    #     param_ranges, 
-    #     min_spectra_in_sequence=5, 
-    #     max_spectra_in_sequence=20
-    # ):
-    #     """
-    #     Generate training examples that consist of sequences of spectra with structured parameter variations.
-    #     For each sequence:
-    #     - Choose 1 to 3 parameters from ["s02", "degen", "deltar", "sigma2", "e0"] to vary.
-    #     - Apply a random variation profile (linear, quadratic, sqrt, log, sinusoidal) over a randomly chosen
-    #         number of steps between min_spectra_in_sequence and max_spectra_in_sequence.
-    #     - Non-varying parameters remain constant.
-    #     """
-
-    #     parameters_list = ["s02", "degen", "deltar", "sigma2", "e0"]
-    #     profile_types = ["linear_increase", "linear_decrease", "quadratic", "sqrt", "log", "sinusoidal"]
-
-    #     tmp_spectra = []
-    #     tmp_parameters = []
-        
-    #     for _ in range(self.num_examples):
-    #         # Randomly choose sequence length for this example
-    #         length = random.randint(min_spectra_in_sequence, max_spectra_in_sequence)
-
-    #         # Choose how many parameters to vary (1 to 3)
-    #         num_vary = random.randint(1, 3)
-    #         vary_params = random.sample(parameters_list, num_vary)
-    #         # The others remain constant
-    #         fixed_params = [p for p in parameters_list if p not in vary_params]
-
-    #         # Assign fixed parameters
-    #         fixed_values = {}
-    #         for p in fixed_params:
-    #             start_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             fixed_values[p] = start_val
-
-    #         # Assign start/end values and profile for varying parameters
-    #         vary_values = {}
-    #         for p in vary_params:
-    #             start_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             end_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             profile_type = random.choice(profile_types)
-    #             vary_values[p] = self._generate_profile(length, start_val, end_val, profile_type)
-
-    #         # Now build the sequence of parameters and spectra
-    #         sequence_spectra = []
-    #         sequence_params = []
-    #         for i in range(length):
-    #             # Construct the parameter set for this step
-    #             step_params = {}
-    #             for p in fixed_params:
-    #                 step_params[p] = fixed_values[p]
-    #             for p in vary_params:
-    #                 step_params[p] = vary_values[p][i]
-
-    #             # Compute A = s02 * degen
-    #             A = step_params["s02"] * step_params["degen"]
-    #             # Generate one spectrum
-    #             # generate_spectrum expects path_parameters in order: s02, degen, deltar, sigma2, e0
-    #             path_parameters = [
-    #                 step_params["s02"],
-    #                 step_params["degen"],
-    #                 step_params["deltar"],
-    #                 step_params["sigma2"],
-    #                 step_params["e0"],
-    #             ]
-    #             self.generate_spectrum(feff_path_file, path_parameters=path_parameters)
-    #             sequence_spectra.append(self._interpolate_if_needed(self.k, self.kweighted_chi, self.k_grid))
-    #             # Store parameters as (A, deltar, sigma2, e0) to match original code
-    #             sequence_params.append([A, step_params["deltar"], step_params["sigma2"], step_params["e0"]])
-
-    #         tmp_spectra.append(sequence_spectra)
-    #         tmp_parameters.append(sequence_params)
-
-    #     self.spectra = np.array(tmp_spectra)      # shape: [num_examples, variable_length, len(k_grid)]
-    #     self.parameters = np.array(tmp_parameters) # shape: [num_examples, variable_length, 4]
-
-    # def generate_training_examples(
-    #     self, 
-    #     feff_path_file, 
-    #     param_ranges, 
-    #     min_spectra_in_sequence=5, 
-    #     max_spectra_in_sequence=20
-    # ):
-    #     """
-    #     Generate training examples that consist of sequences of spectra with structured parameter variations.
-    #     For each sequence:
-    #     - Choose 1 to 3 parameters to vary.
-    #     - Apply a random variation profile.
-    #     - Sequence lengths vary between min_spectra_in_sequence and max_spectra_in_sequence.
-    #     """
-
-    #     parameters_list = ["s02", "degen", "deltar", "sigma2", "e0"]
-    #     profile_types = ["linear_increase", "linear_decrease", "quadratic", "sqrt", "log", "sinusoidal"]
-
-    #     tmp_spectra = []
-    #     tmp_parameters = []
-        
-    #     for _ in range(self.num_examples):
-    #         # Randomly choose sequence length for this example
-    #         length = random.randint(min_spectra_in_sequence, max_spectra_in_sequence)
-
-    #         # Choose how many parameters to vary (1 to 3)
-    #         num_vary = random.randint(1, 3)
-    #         vary_params = random.sample(parameters_list, num_vary)
-    #         # The others remain constant
-    #         fixed_params = [p for p in parameters_list if p not in vary_params]
-
-    #         # Assign fixed parameters
-    #         fixed_values = {}
-    #         for p in fixed_params:
-    #             start_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             fixed_values[p] = start_val
-
-    #         # Assign start/end values and profile for varying parameters
-    #         vary_values = {}
-    #         for p in vary_params:
-    #             start_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             end_val = random.uniform(param_ranges[p][0], param_ranges[p][1])
-    #             profile_type = random.choice(profile_types)
-    #             vary_values[p] = self._generate_profile(length, start_val, end_val, profile_type)
-
-    #         # Now build the sequence of parameters and spectra
-    #         sequence_spectra = []
-    #         sequence_params = []
-    #         for i in range(length):
-    #             # Construct the parameter set for this step
-    #             step_params = {fp: fixed_values[fp] for fp in fixed_params}
-    #             for vp in vary_params:
-    #                 step_params[vp] = vary_values[vp][i]
-
-    #             # Compute A = s02 * degen
-    #             A = step_params["s02"] * step_params["degen"]
-    #             # generate_spectrum expects path_parameters in order: s02, degen, deltar, sigma2, e0
-    #             path_parameters = [
-    #                 step_params["s02"],
-    #                 step_params["degen"],
-    #                 step_params["deltar"],
-    #                 step_params["sigma2"],
-    #                 step_params["e0"],
-    #             ]
-    #             self.generate_spectrum(feff_path_file, path_parameters=path_parameters)
-    #             #interp_spectrum = self._interpolate_if_needed(self.k, self.kweighted_chi, self.k_grid)
-    #             #sequence_spectra.append(interp_spectrum)
-    #             sequence_spectra.append(self.kweighted_chi)
-    #             # Store parameters as (A, deltar, sigma2, e0) to match original code
-    #             sequence_params.append([A, step_params["deltar"], step_params["sigma2"], step_params["e0"]])
-
-    #         tmp_spectra.append(sequence_spectra)
-    #         tmp_parameters.append(sequence_params)
-
-    #     # Now we have lists of sequences with variable lengths
-    #     # Find max length
-    #     max_len = max(len(seq) for seq in tmp_spectra)
-
-    #     ## Get the dimension of k_grid and parameters per step
-    #     #k_len = len(self.k_grid)
-    #     k_len = 401  # Hardcoded for now
-    #     param_dim = 4  # (A, deltar, sigma2, e0)
-
-    #     # Initialize arrays with zeros for padding
-    #     # shape: [num_examples, max_len, k_len] and [num_examples, max_len, 4]
-    #     padded_spectra = np.zeros((self.num_examples, max_len, k_len), dtype=float)
-    #     padded_parameters = np.zeros((self.num_examples, max_len, param_dim), dtype=float)
-
-    #     for i, (spec_seq, param_seq) in enumerate(zip(tmp_spectra, tmp_parameters)):
-    #         seq_len = len(spec_seq)
-    #         padded_spectra[i, :seq_len, :] = spec_seq
-    #         padded_parameters[i, :seq_len, :] = param_seq
-
-    #     self.spectra = padded_spectra
-    #     self.parameters = padded_parameters
 
     def generate_training_examples(
         self, 
@@ -526,3 +352,67 @@ class SyntheticSpectrumS:
         del self.spectra
         del self.parameters
         print("Training data has been freed.")
+
+
+    def generate_one_sequence(
+        self,
+        feff_path_file,
+        sequence_length,
+        parameter_profiles,    # Dict of {param: (start, end, profile_type)}
+        fixed_parameters=None  # Dict of {param: value} for constant params
+    ):
+        """
+        Generate single sequence of spectra with defined parameter variations.
+        
+        Args:
+            feff_path_file (str): Path to FEFF input file
+            sequence_length (int): Number of spectra in sequence
+            parameter_profiles (dict): Dictionary of varying parameters
+                {param_name: (start_val, end_val, profile_type)}
+            fixed_parameters (dict): Dictionary of fixed parameters
+                {param_name: value}
+                
+        Returns:
+            tuple: (spectra_sequence, parameter_sequence)
+        """
+        if fixed_parameters is None:
+            fixed_parameters = {}
+            
+        # Generate profiles for varying parameters
+        vary_values = {}
+        for param, (start, end, profile) in parameter_profiles.items():
+            vary_values[param] = self._generate_profile(sequence_length, start, end, profile)
+            
+        # Generate sequence
+        sequence_spectra = []
+        sequence_params = []
+        
+        for i in range(sequence_length):
+            # Combine fixed and varying parameters for this step
+            step_params = fixed_parameters.copy()
+            for param in vary_values:
+                step_params[param] = vary_values[param][i]
+                
+            # Ensure all required parameters exist
+            for param in ["s02", "degen", "deltar", "sigma2", "e0"]:
+                if param not in step_params:
+                    step_params[param] = 1.0 if param in ["s02", "degen"] else 0.0
+                    
+            # Generate spectrum
+            path_parameters = [
+                step_params["s02"],
+                step_params["degen"], 
+                step_params["deltar"],
+                step_params["sigma2"],
+                step_params["e0"]
+            ]
+            
+            self.generate_spectrum(feff_path_file, path_parameters)
+            sequence_spectra.append(self.kweighted_chi.copy())
+            
+            # Store parameters as [A, deltar, sigma2, e0]
+            A = step_params["s02"] * step_params["degen"]
+            sequence_params.append([A, step_params["deltar"], 
+                                step_params["sigma2"], step_params["e0"]])
+                                
+        return np.array(sequence_spectra), np.array(sequence_params)
