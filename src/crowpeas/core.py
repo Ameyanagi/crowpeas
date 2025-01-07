@@ -6,6 +6,7 @@ import os
 import math
 from typing import Sequence, Literal
 import json
+import pandas as pd
 
 from .data_generator import SyntheticSpectrum
 from .data_generatorS import SyntheticSpectrumS
@@ -1963,7 +1964,7 @@ class CrowPeas:
         print(self.synthetic_spectra.spectra[0][mask_bool].shape)
         print(self.synthetic_spectra.parameters[0][mask_bool].shape)
 
-        vary_dict = {"degen": (5,12,"quadratic"), "deltar": (-0.2,0.2,"quadratic"), "sigma2": (0.02,0.003,"quadratic"), "e0": (-10,10,"quadratic")}
+        vary_dict = {"degen": (5,12,"sinusoidal"), "deltar": (-0.02,0.00,"quadratic"), "sigma2": (0.003,0.01,"log"), "e0": (5,5,"sqrt")}
         const_dict = {"s02": 1}
 
         # novo_seq, novo_params = self.synthetic_spectra.generate_one_sequence(feff_path_file=self.feff_path_file,
@@ -1974,7 +1975,7 @@ class CrowPeas:
         sequence_length=20,
         parameter_profiles=vary_dict,
         fixed_parameters=const_dict,
-        n_glitches=20)
+        n_glitches=0)
 
         print(novo_seq.shape)
         print(novo_params.shape)
@@ -2008,59 +2009,462 @@ class CrowPeas:
         print(plt_y_data_param_0_pred)
 
         fig = plt.figure(figsize=(15, 5))
-        gs = gridspec.GridSpec(1, 8)  # Create 8 columns to work with
+        gs = gridspec.GridSpec(1, 8)
 
-        # First subplot takes 4 columns
+        # Create colorblind-friendly gradient
+        n_spectra = len(plot_x_data)
+        colors = plt.cm.viridis(np.linspace(0, 1, n_spectra))
+
+        k_grid = self.nn_k_grid
+        k_grid = np.array(k_grid, dtype=np.float32)
+
+        # First subplot - spectra
         ax0 = plt.subplot(gs[0, 0:4])
-        for spectrum in plot_x_data:
-            ax0.plot(spectrum)
+        for idx, spectrum in enumerate(plot_x_data):
+            ax0.plot(k_grid, spectrum, color=colors[idx], linewidth=1.5)
+        ax0.set_xlim([0, 20])
         ax0.set_title("Input Spectra")
         ax0.set_xlabel("k (Å$^{-1}$)")
-        ax0.set_ylabel("$\chi$(k)*k^2")
+        ax0.set_ylabel("$\chi(k)k^2$")
 
-        # Remaining subplots take 1 column each
+        # Parameter plots with matching colors
         ax1 = plt.subplot(gs[0, 4])
-        ax1.plot(plt_y_data_param_0, label='True')
-        ax1.plot(plt_y_data_param_0_pred, label='Predicted', linestyle='--', color='red')
-        ax1.set_ylim([5, 12])
-        ax1.set_title("A")
+        for idx in range(n_spectra):
+            ax1.plot(idx, plt_y_data_param_0[idx], 'o', color=colors[idx], markersize=8)
+        ax1.plot(plt_y_data_param_0_pred, '--', color='black', label='Predicted', linewidth=2)
+        ax1.set_ylim([4.9, 12.1])
+        ax1.set_title("$A$")
         ax1.set_xlabel("Spectra Index")
         ax1.set_ylabel("Value")
-        ax1.legend(fontsize=7)
+        ax1.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax2 = plt.subplot(gs[0, 5])
-        ax2.plot(plt_y_data_param_1, label='True')
-        ax2.plot(plt_y_data_param_1_pred, label='Predicted', linestyle='--', color='red')
-        ax2.set_ylim([-0.2, 0.2])
+        for idx in range(n_spectra):
+            ax2.plot(idx, plt_y_data_param_1[idx], 'o', color=colors[idx], markersize=8)
+        ax2.plot(plt_y_data_param_1_pred, '--', color='black', label='Predicted', linewidth=2)
+        ax2.set_ylim([-0.025, 0.01])
         ax2.set_title("$\Delta R$")
         ax2.set_xlabel("Spectra Index")
         ax2.set_ylabel("Value")
-        ax2.legend(fontsize=7)
+        ax2.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax3 = plt.subplot(gs[0, 6])
-        ax3.plot(plt_y_data_param_2, label='True')
-        ax3.plot(plt_y_data_param_2_pred, label='Predicted', linestyle='--', color='red')
-        ax3.set_ylim([0.003, 0.02])
+        for idx in range(n_spectra):
+            ax3.plot(idx, plt_y_data_param_2[idx], 'o', color=colors[idx], markersize=8)
+        ax3.plot(plt_y_data_param_2_pred, '--', color='black', label='Predicted', linewidth=2)
+        ax3.set_ylim([0.0015, 0.011])
         ax3.set_title("$\sigma^2$")
         ax3.set_xlabel("Spectra Index")
         ax3.set_ylabel("Value")
-        ax3.legend(fontsize=7)
+        ax3.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax4 = plt.subplot(gs[0, 7])
-        ax4.plot(plt_y_data_param_3, label='True')
-        ax4.plot(plt_y_data_param_3_pred, label='Predicted', linestyle='--', color='red')
-        ax4.set_ylim([-10, 10])
+        for idx in range(n_spectra):
+            ax4.plot(idx, plt_y_data_param_3[idx], 'o', color=colors[idx], markersize=8)
+        ax4.plot(plt_y_data_param_3_pred, '--', color='black', label='Predicted', linewidth=2)
+        ax4.set_ylim([2.5, 7.5])
         ax4.set_title("$E_0$")
         ax4.set_xlabel("Spectra Index")
         ax4.set_ylabel("Value")
-        ax4.legend(fontsize=7)
+        ax4.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         plt.tight_layout()
         save_path = os.path.join(self.config_dir, self.output_dir) + "/training_example.png"
-        plt.savefig(save_path, dpi=300)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
+
+
+    def analyze_noise_sensitivity(self, sequence_length=20, n_trials=5, max_glitches=0):
+        """Analyze how prediction accuracy varies with noise level."""
+        
+        vary_dict = {"degen": (5,12,"sinusoidal"), 
+                    "deltar": (-0.02,0.00,"quadratic"), 
+                    "sigma2": (0.003,0.01,"log"), 
+                    "e0": (5,5,"sqrt")}
+        const_dict = {"s02": 1}
+        
+        glitch_counts = range(0, max_glitches + 1, 1)
+        param_errors = {param: [] for param in vary_dict.keys()}
+        
+        for n_glitches in glitch_counts:
+            trial_errors = {param: [] for param in vary_dict.keys()}
+            
+            for trial in range(n_trials):
+                novo_seq, novo_params = self.synthetic_spectra.generate_glitched_sequence(
+                    feff_path_file=self.feff_path_file,
+                    sequence_length=sequence_length,
+                    parameter_profiles=vary_dict,
+                    fixed_parameters=const_dict,
+                    n_glitches=n_glitches
+                )
+                
+                # Normalize both input spectra and parameters
+                normalized_x_data, _ = normalize_spectra(novo_seq, self.norm_params_spectra)
+                denormalized_params = novo_params
+                
+                normalized_x_data = torch.tensor(normalized_x_data)
+                with torch.no_grad():
+                    predictions = self.model(normalized_x_data.to(self.model.device))
+                    predictions = predictions.cpu().numpy()
+                    predictions = denormalize_data(predictions, self.norm_params_parameters)
+                
+                # Debug prints for zero noise case
+                if n_glitches == 0 and trial == 0:
+                    print("\nZero noise validation (normalized values):")
+                    for i, param in enumerate(vary_dict.keys()):
+                        print(f"\n{param}:")
+                        print(f"True values: {denormalized_params[:3, i]}")
+                        print(f"Predictions: {predictions[:3, i]}")
+                if n_glitches == 20 and trial == 0:
+                    print("\nHigh noise validation (normalized values):")
+                    for i, param in enumerate(vary_dict.keys()):
+                        print(f"\n{param}:")
+                        print(f"True values: {denormalized_params[:3, i]}")
+                        print(f"Predictions: {predictions[:3, i]}")
+                
+                # Calculate errors using normalized values
+                for i, param in enumerate(vary_dict.keys()):
+                    errors = []
+                    for j in range(len(denormalized_params)):
+                        true_val = denormalized_params[j, i]
+                        pred_val = predictions[j, i]
+                        if abs(true_val) > 1e-10:
+                            error = abs((true_val - pred_val) / true_val) * 100
+                            errors.append(error)
+                    
+                    avg_error = np.mean(errors) if errors else 0
+                    trial_errors[param].append(avg_error)
+            
+            # Average errors across trials
+            for param in vary_dict.keys():
+                param_errors[param].append(np.mean(trial_errors[param]))
+        
+        # Plot results
+        plt.figure(figsize=(10, 6))
+        for param in vary_dict.keys():
+            plt.plot(glitch_counts, param_errors[param], marker='o', label=f'{param}')
+        
+        plt.xlabel('Number of Glitches')
+        plt.ylabel('Mean Percentage Error')
+        plt.title('Parameter-wise Prediction Error vs Noise Level')
+        plt.legend()
+        plt.grid(True)
+        plt.ylim(0, 100)
+        
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_sensitivity.png"
+        plt.savefig(save_path)
+        plt.close()
+
+    def analyze_noise_sensitivity_method2(self, sequence_length=20, n_trials=10, max_noise=0.2):
+        """Analyze how prediction accuracy varies with noise level."""
+        
+        vary_dict = {"degen": (5,12,"sinusoidal"), 
+                    "deltar": (-0.02,0.00,"quadratic"), 
+                    "sigma2": (0.003,0.01,"log"), 
+                    "e0": (5,5,"sqrt")}
+        const_dict = {"s02": 1}
+        plot_names = ["$N$", "$\Delta R$", "$\sigma^2$", "$E_0$"]
+        
+        noise_levels = np.linspace(0, max_noise, 10)  # 10 points from 0 to max_noise
+        param_errors = {param: [] for param in vary_dict.keys()}
+        
+        for noise_level in noise_levels:
+            trial_errors = {param: [] for param in vary_dict.keys()}
+            
+            for trial in range(n_trials):
+                novo_seq, novo_params = self.synthetic_spectra.generate_glitched_sequence(
+                    feff_path_file=self.feff_path_file,
+                    sequence_length=sequence_length,
+                    parameter_profiles=vary_dict,
+                    fixed_parameters=const_dict,
+                    n_glitches=10,  # No glitches, using noise instead
+                    noise_level=noise_level
+                )
+                
+                # Normalize input spectra for model
+                normalized_x_data, _ = normalize_spectra(novo_seq, self.norm_params_spectra)
+                denormalized_params = novo_params
+                
+                normalized_x_data = torch.tensor(normalized_x_data)
+                with torch.no_grad():
+                    predictions = self.model(normalized_x_data.to(self.model.device))
+                    predictions = predictions.cpu().numpy()
+                    predictions = denormalize_data(predictions, self.norm_params_parameters)
+                
+                # Debug prints
+                if noise_level == 0 and trial == 0:
+                    print("\nZero noise validation (normalized values):")
+                    for i, param in enumerate(vary_dict.keys()):
+                        print(f"\n{param}:")
+                        print(f"True values: {denormalized_params[:3, i]}")
+                        print(f"Predictions: {predictions[:3, i]}")
+                        errors = []
+                        for j in range(len(denormalized_params)):
+                            true_val = denormalized_params[j, i]
+                            pred_val = predictions[j, i]
+                            if abs(true_val) > 1e-10:
+                                error = abs((true_val - pred_val) / true_val) * 100
+                                errors.append(error)
+                        avg_error = np.mean(errors) if errors else 0
+                        print(f"errors: {errors}")
+                        print(f"Average error: {avg_error}")
+                
+                # Calculate errors using normalized values
+                for i, param in enumerate(vary_dict.keys()):
+                    errors = []
+                    for j in range(len(denormalized_params)):
+                        true_val = denormalized_params[j, i]
+                        pred_val = predictions[j, i]
+                        if abs(true_val) > 1e-10:
+                            error = abs((true_val - pred_val) / true_val) * 100
+                            errors.append(error)
+                    
+                    #avg_error = np.mean(errors) if errors else 0
+                    # median
+                    avg_error = np.median(errors) if errors else 0
+                    trial_errors[param].append(avg_error)
+            
+            # Average errors across trials
+            for param in vary_dict.keys():
+                param_errors[param].append(np.mean(trial_errors[param]))
+        
+        # Plot results
+        plt.figure(figsize=(8, 4.5))
+        for idx, param in enumerate(vary_dict.keys()):
+
+            plt.plot(noise_levels, param_errors[param], marker='o', label=plot_names[idx])
+        
+        plt.xlabel('Noise Level')
+        plt.ylabel('% Error')
+        plt.title('Parameter-wise Prediction Error vs Noise Level')
+        plt.legend()
+        plt.grid(True)
+        plt.ylim(0, 20)
+        
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_sensitivity_glitch.png"
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def visualize_noise_levels(self, max_noise=0.2, n_levels=3):
+        """Visualize how different noise levels affect a single spectrum."""
+        
+        # Use same parameter settings as analyze_noise_sensitivity
+        vary_dict = {"degen": (5,12,"sinusoidal"), 
+                    "deltar": (-0.02,0.00,"quadratic"), 
+                    "sigma2": (0.003,0.01,"log"), 
+                    "e0": (5,5,"sqrt")}
+        const_dict = {"s02": 1}
+        
+        # Generate noise levels
+        noise_levels = np.linspace(0, max_noise, n_levels)
+        
+        # Create subplots
+        fig, axes = plt.subplots(n_levels, 1, figsize=(8, 1.5*n_levels))
+        fig.suptitle('Effect of Noise Levels on Spectrum')
+        
+        # Generate base spectrum (no noise)
+        base_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
+            feff_path_file=self.feff_path_file,
+            sequence_length=1,  # Just one spectrum
+            parameter_profiles=vary_dict,
+            fixed_parameters=const_dict,
+            n_glitches=3,
+            glitch_height=(.5,3),
+            noise_level=0
+        )
+
+        k_grid = self.nn_k_grid
+        k_grid = np.array(k_grid, dtype=np.float32)
+        
+        # Plot spectra with different noise levels
+        for idx, noise_level in enumerate(noise_levels):
+            noisy_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
+                feff_path_file=self.feff_path_file,
+                sequence_length=1,
+                parameter_profiles=vary_dict,
+                fixed_parameters=const_dict,
+                n_glitches=3,
+                glitch_height=(.5,3),
+                noise_level=noise_level
+            )
+            
+            axes[idx].plot(k_grid, base_seq[0], 'b-', label='Clean', alpha=0.5)
+            axes[idx].plot(k_grid, noisy_seq[0], 'r-', label='Noisy', alpha=0.7)
+            axes[idx].set_xlim([0, 20])
+            axes[idx].set_title(f'Noise Level: {noise_level:.3f}')
+            axes[idx].set_xlabel('k (Å$^{-1}$)')
+            axes[idx].set_ylabel('$\chi(k)k^2$')
+            axes[idx].legend()
+            axes[idx].grid(True)
+        
+        plt.tight_layout()
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_visualization_glitch.png"
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
+        plt.close()
+
+
+    # def visualize_noise_impact(self, sequence_length=20, noise_levels=[10,20,30,40,50,75,100], n_trials=5):
+    #     vary_dict = {"degen": (5,12,"sinusoidal"), 
+    #                 "deltar": (-0.02,0.00,"quadratic"), 
+    #                 "sigma2": (0.003,0.01,"log"), 
+    #                 "e0": (5,5,"sqrt")}
+    #     const_dict = {"s02": 1}
+
+    #     # Generate clean reference data
+    #     clean_seq, true_params = self.synthetic_spectra.generate_glitched_sequence(
+    #         feff_path_file=self.feff_path_file,
+    #         sequence_length=sequence_length,
+    #         parameter_profiles=vary_dict,
+    #         fixed_parameters=const_dict,
+    #         n_glitches=10
+    #     )
+        
+    #     # Get clean predictions
+    #     normalized_clean, _ = normalize_spectra(clean_seq, self.norm_params_spectra)
+    #     normalized_clean = torch.tensor(normalized_clean)
+    #     with torch.no_grad():
+    #         clean_predictions = self.model(normalized_clean.to(self.model.device)).cpu().numpy()
+
+    #     # Setup plot
+    #     fig = plt.figure(figsize=(20, 10))
+    #     gs = gridspec.GridSpec(2, 4, figure=fig)
+    #     param_names = ['Coordination Number', 'ΔR', '$\sigma^2$', '$E_0$']
+    #     ylims = [(4, 13), (-0.025, 0.005), (0.0015, 0.011), (2.5, 7.5)]
+        
+    #     # Plot top row (clean data)
+    #     for i in range(4):
+    #         ax = fig.add_subplot(gs[0, i])
+    #         ax.plot(true_params[:, i], '-', label='True', color='blue')
+    #         ax.plot(clean_predictions[:, i], '--', label='Predicted', color='black')
+    #         ax.set_title(param_names[i])
+    #         ax.set_xlabel('Spectra Index')
+    #         ax.set_ylabel('Value')
+    #         ax.set_ylim(ylims[i])
+    #         ax.legend()
+
+    #     # Plot bottom row (noisy predictions)
+    #     colors = plt.cm.viridis(np.linspace(0, 1, len(noise_levels)))
+    #     for i in range(4):
+    #         ax = fig.add_subplot(gs[1, i])
+    #         ax.plot(true_params[:, i], '-', label='True', color='blue')
+            
+    #         for idx, n_glitches in enumerate(noise_levels):
+    #             noisy_predictions = []
+    #             for _ in range(n_trials):
+    #                 noisy_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
+    #                     feff_path_file=self.feff_path_file,
+    #                     sequence_length=sequence_length,
+    #                     parameter_profiles=vary_dict,
+    #                     fixed_parameters=const_dict,
+    #                     n_glitches=n_glitches
+    #                 )
+    #                 normalized_noisy, _ = normalize_spectra(noisy_seq, self.norm_params_spectra)
+    #                 normalized_noisy = torch.tensor(normalized_noisy)
+    #                 with torch.no_grad():
+    #                     pred = self.model(normalized_noisy.to(self.model.device)).cpu().numpy()
+    #                 noisy_predictions.append(pred)
+                
+    #             predictions = np.array(noisy_predictions)
+    #             mean_pred = np.mean(predictions, axis=0)
+    #             std_pred = np.std(predictions, axis=0)
+                
+    #             ax.fill_between(range(sequence_length), 
+    #                         mean_pred[:, i] - std_pred[:, i],
+    #                         mean_pred[:, i] + std_pred[:, i],
+    #                         alpha=0.2, color=colors[idx])
+    #             ax.plot(mean_pred[:, i], '--', color=colors[idx], 
+    #                 label=f'{n_glitches} glitches')
+            
+    #         ax.set_title(f'Noisy {param_names[i]}')
+    #         ax.set_xlabel('Spectra Index')
+    #         ax.set_ylabel('Value')
+    #         ax.set_ylim(ylims[i])
+    #         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    #     plt.tight_layout()
+    #     save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_impact_glitch"
+    #     plt.savefig(save_path + ".png", dpi=300, bbox_inches='tight')
+    #     plt.savefig(save_path + ".svg", dpi=300, bbox_inches='tight')
+    #     plt.close()
 
 
 
+    def plot_loss_curves(self, metrics_file, train_rate=7, val_rate=80, best_rate=1):
+        """
+        Plots training, validation, and best validation loss curves in a colorblind-friendly manner with a log scale.
+        
+        Args:
+            metrics_file (str): Path to the CSV file containing metrics data.
+        """
+        # Load the data
+        data = pd.read_csv(metrics_file)
+        
+        # Sample data points at different rates
+        train_data = data.iloc[::train_rate]
+        val_data = data.iloc[::val_rate]
+        best_data = data.iloc[::best_rate]
+        
+        # Plotting
+        plt.figure(figsize=(5, 3))
+        
+        # Use colorblind-friendly colors with different sampling rates
+        plt.plot(train_data['epoch'], train_data['train/loss'], 
+                label="Training Loss", marker='o', color="#D55E00", markersize=3, linestyle=' ')
+        plt.plot(val_data['epoch'], val_data['val/loss'], 
+                label="Validation Loss", marker='o', color="#0072B2", markersize=3, linestyle=' ')
+        plt.plot(best_data['epoch'], best_data['val/loss_best'], 
+                label="Best Validation Loss", marker='o', linestyle='--', color="#009E73", markersize=1)
+        
+        plt.yscale('log')
+        plt.xlabel("Epoch")
+        plt.ylabel("Log(Loss)")
+        plt.legend()
+        plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.png")
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
+        plt.close()
+
+    # def plot_loss_curves(self, metrics_file, train_window=50, val_window=100, best_window=10):
+    #     """
+    #     Plots smoothed training, validation, and best validation loss curves using rolling averages.
+        
+    #     Args:
+    #         metrics_file (str): Path to the CSV file containing metrics data.
+    #         train_window (int): Window size for training loss smoothing. Default: 50.
+    #         val_window (int): Window size for validation loss smoothing. Default: 25.
+    #         best_window (int): Window size for best validation loss smoothing. Default: 10.
+    #     """
+    #     # Load the data
+    #     data = pd.read_csv(metrics_file)
+        
+    #     # Apply rolling average smoothing
+    #     train_smooth = data['train/loss'].rolling(window=train_window, min_periods=1).mean()
+    #     val_smooth = data['val/loss'].rolling(window=val_window, min_periods=1).mean()
+    #     best_smooth = data['val/loss_best'].rolling(window=best_window, min_periods=1).mean()
+        
+    #     # Plotting
+    #     plt.figure(figsize=(8, 6))
+        
+    #     # Use colorblind-friendly colors with smoothed data
+    #     plt.plot(data['epoch'], train_smooth, 
+    #             label="Training Loss", color="#D55E00")
+    #     plt.plot(data['epoch'], val_smooth, 
+    #             label="Validation Loss", color="#0072B2")
+    #     plt.plot(data['epoch'], best_smooth, 
+    #             label="Best Validation Loss", linestyle='--', color="#009E73")
+        
+    #     plt.yscale('log')
+    #     plt.xlabel("Epoch")
+    #     plt.ylabel("Log(Loss)")
+    #     plt.legend()
+    #     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    #     plt.tight_layout()
+    #     plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.png")
+    #     plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
+    #     plt.close()
 
 class HistoryLogger(pl.Callback):
     def __init__(self, history):
@@ -2146,7 +2550,11 @@ def main():
         #.plot_results()
     )
     #crowpeas.print_training_example()
-    crowpeas.print_seq_example()
+    #crowpeas.print_seq_example()
+    crowpeas.analyze_noise_sensitivity_method2()
+    crowpeas.visualize_noise_levels()
+    #crowpeas.plot_loss_curves("/home/nick/Projects/crowpeas/MLP_Rh/lightning_logs/version_4/metrics.csv")
+    #crowpeas.visualize_noise_impact()
     #crowpeas.plot_parity2()
     #crowpeas.plot_training_history()
     #crowpeas.plot_results()

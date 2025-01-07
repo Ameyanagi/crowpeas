@@ -432,16 +432,23 @@ class SyntheticSpectrumS:
             
         return glitched_spectrum
 
+    def _add_noise(self, spectrum, noise_level):
+        """Add Gaussian white noise to spectrum"""
+        max_amplitude = np.max(np.abs(spectrum))
+        noise = np.random.normal(0, noise_level * max_amplitude, len(spectrum))
+        return spectrum + noise
+
     def generate_glitched_sequence(
         self,
         feff_path_file,
         sequence_length,
         parameter_profiles,    # Dict of {param: (start, end, profile_type)}
-        n_glitches=3,         # Number of glitches per spectrum
+        n_glitches=0,         # Number of glitches per spectrum
         glitch_height=(0.5, 0.7), # Range for glitch heights as fraction of max
+        noise_level=0.0,      # Standard deviation of noise relative to max amplitude
         fixed_parameters=None  # Dict of {param: value} for constant params
     ):
-        """Generate sequence with random glitches for testing robustness"""
+        """Generate sequence with random glitches and/or noise for testing robustness"""
         
         # Generate base sequence
         sequence_spectra, sequence_params = self.generate_one_sequence(
@@ -451,14 +458,26 @@ class SyntheticSpectrumS:
             fixed_parameters
         )
         
-        # Add glitches to each spectrum
-        glitched_spectra = []
+        # Add glitches and noise to each spectrum
+        modified_spectra = []
         for spectrum in sequence_spectra:
-            glitched_spectrum = self._add_glitches(
-                spectrum,
-                n_glitches,
-                glitch_height
-            )
-            glitched_spectra.append(glitched_spectrum)
+            modified_spectrum = spectrum.copy()
             
-        return np.array(glitched_spectra), sequence_params
+            # Add glitches if requested
+            if n_glitches > 0:
+                modified_spectrum = self._add_glitches(
+                    modified_spectrum,
+                    n_glitches,
+                    glitch_height
+                )
+                
+            # Add noise if requested
+            if noise_level > 0:
+                modified_spectrum = self._add_noise(
+                    modified_spectrum,
+                    noise_level
+                )
+                
+            modified_spectra.append(modified_spectrum)
+            
+        return np.array(modified_spectra), sequence_params
