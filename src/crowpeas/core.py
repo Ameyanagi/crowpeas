@@ -22,6 +22,7 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
 from torchinfo import torchinfo
+from laplace import Laplace
 
 from .utils import (
     normalize_data,
@@ -111,7 +112,7 @@ class CrowPeas:
     # synthetic spectra for training
     synthetic_spectra: SyntheticSpectrum | SyntheticSpectrumS
     data_loader: CrowPeasDataModule
-    history: dict = {"train_loss": [], "val_loss": []}
+    history: dict = {"train/loss": [], "val/loss": []}
 
     # only used for validating the test results
     x_test: torch.Tensor
@@ -665,28 +666,28 @@ class CrowPeas:
 
         return self
 
-    # def init_synthetic_spectra(self, generate=True):
-    #     self.synthetic_spectra = SyntheticSpectrum(
-    #         feff_path_file=self.feff_path_file,
-    #         param_ranges=self.param_ranges,
-    #         training_mode=self.training_mode,
-    #         num_examples=self.num_examples,
-    #         k_weight=self.k_weight,
-    #         k_range=self.k_range,
-    #         spectrum_noise=self.spectrum_noise,
-    #         noise_range=self.noise_range,
-    #         seed=self.seed,
-    #         generate=generate,
-    #     )
+    def init_synthetic_spectra(self, generate=True): # for training
+        self.synthetic_spectra = SyntheticSpectrum(
+            feff_path_file=self.feff_path_file,
+            param_ranges=self.param_ranges,
+            training_mode=self.training_mode,
+            num_examples=self.num_examples,
+            k_weight=self.k_weight,
+            k_range=self.k_range,
+            spectrum_noise=self.spectrum_noise,
+            noise_range=self.noise_range,
+            seed=self.seed,
+            generate=generate,
+        )
 
-    #     if hasattr(self, "synthetic_spectra") and (
-    #         self.synthetic_spectra.k is not None
-    #     ):
-    #         self.nn_k_grid = self.synthetic_spectra.k
+        if hasattr(self, "synthetic_spectra") and (
+            self.synthetic_spectra.k is not None
+        ):
+            self.nn_k_grid = self.synthetic_spectra.k
 
-    #     return self
+        return self
 
-    def init_synthetic_spectra(self, generate=True):
+    def init_synthetic_spectra_S(self, generate=True): # for testing with sequences
         self.synthetic_spectra = SyntheticSpectrumS(
             feff_path_file=self.feff_path_file,
             param_ranges=self.param_ranges,
@@ -948,10 +949,10 @@ class CrowPeas:
         trainer = pl.Trainer(max_epochs=self.epochs, callbacks=callbacks)
         trainer.fit(
             self.model,
-            # self.data_loader.train_dataloader(batch_size=self.batch_size),
-            # self.data_loader.val_dataloader(batch_size=self.batch_size),
-            self.data_loader.train_dataloader(),
-            self.data_loader.val_dataloader(),
+            self.data_loader.train_dataloader(batch_size=self.batch_size),
+            self.data_loader.val_dataloader(batch_size=self.batch_size),
+            #self.data_loader.train_dataloader(),
+            #self.data_loader.val_dataloader(),
         )
 
         best_checkpoint = callback.best_model_path
@@ -1128,7 +1129,7 @@ class CrowPeas:
         return fig
 
 
-    def plot_parity2(self, save_path="/parity.png"):
+    def plot_parity2(self, save_path="/parity.png"): # for sequence training data
 
 
         # Construct full save path
@@ -1455,6 +1456,7 @@ class CrowPeas:
                 'uncertainty_e0': e0_unc,
                 'interpolated_chi_k': interpolated_chi_k,
                 'interpolated_chi_q': interpolated_chi_q,
+                'normalized_chi_k': normalized_chi_k[0],
                 'artemis_result': artemis_result,
                 'artemis_unc': artemis_unc_entry,
                 'dataset_name': dataset_name
@@ -1543,10 +1545,12 @@ class CrowPeas:
 
 
 
-    def plot_results(self):
+    def plot_results(self, sequence = False):
         dataset_names = self.config["experiment"]["dataset_names"]
-        #predictions = self.run_predictions()
-        predictions = self.run_predictions_S()
+        if not sequence:
+            predictions = self.run_predictions()
+        else:
+            predictions = self.run_predictions_S() # for sequence training data
         num_predictions = len(predictions)
         kmin = self.k_range[0]
         kmax = self.k_range[1]
@@ -1587,7 +1591,7 @@ class CrowPeas:
                 [min_artemis[0]-1, max_artemis[0]+1],
                 'r--'
             )
-            axs_params[0].set_title('Delta A')
+            axs_params[0].set_title('A')
             axs_params[0].set_xlabel('NN')
             axs_params[0].set_ylabel('Artemis')
             axs_params[0].tick_params(axis='both', which='major', labelsize=8)
@@ -1619,7 +1623,7 @@ class CrowPeas:
                 [min_artemis[2]-0.01, max_artemis[2]+0.01],
                 'r--'
             )
-            axs_params[2].set_title('Sigma2')
+            axs_params[2].set_title('$\sigma^{2}$')
             axs_params[2].set_xlabel('NN')
             axs_params[2].set_ylabel('Artemis')
             axs_params[2].tick_params(axis='both', which='major', labelsize=8)
@@ -1633,7 +1637,7 @@ class CrowPeas:
             axs_params[3].plot(
                 [-10, 10], [-10, 10], 'r--'
             )
-            axs_params[3].set_title('E0')
+            axs_params[3].set_title('$\Delta$E0')
             axs_params[3].set_xlabel('NN')
             axs_params[3].set_ylabel('Artemis')
             axs_params[3].tick_params(axis='both', which='major', labelsize=8)
@@ -1699,8 +1703,8 @@ class CrowPeas:
 
         """Plot training and validation loss curves"""
         plt.figure(figsize=(10, 6))
-        plt.plot(self.history["train_loss"], label="Training Loss")
-        plt.plot(self.history["val_loss"], label="Validation Loss")
+        plt.plot(self.history["train/loss"], label="Training Loss")
+        plt.plot(self.history["val/loss"], label="Validation Loss")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title("Training History")
@@ -1715,16 +1719,16 @@ class CrowPeas:
 
  
 
-    def monte_carlo_uncertainty(self, EXAFS_experiment, predicted_params, num_samples=1000, perturb_scale=0.05):
-        sampled_params = np.random.normal(loc=predicted_params, 
-                                        scale = [perturb_scale * abs(p) for p in predicted_params], 
-                                        size=(num_samples, len(predicted_params)))
-        mse_list = []
-        for params in sampled_params:
-            synth_EXAFS = self.build_synth_spectra(params)
-            mse = self.get_MSE_error(EXAFS_experiment, synth_EXAFS)
-            mse_list.append(mse)
-        return np.mean(mse_list), np.std(mse_list)
+    # def monte_carlo_uncertainty(self, EXAFS_experiment, predicted_params, num_samples=1000, perturb_scale=0.05):
+    #     sampled_params = np.random.normal(loc=predicted_params, 
+    #                                     scale = [perturb_scale * abs(p) for p in predicted_params], 
+    #                                     size=(num_samples, len(predicted_params)))
+    #     mse_list = []
+    #     for params in sampled_params:
+    #         synth_EXAFS = self.build_synth_spectra(params)
+    #         mse = self.get_MSE_error(EXAFS_experiment, synth_EXAFS)
+    #         mse_list.append(mse)
+    #     return np.mean(mse_list), np.std(mse_list)
 
     def objective(self, EXAFS_experiment, params):
         # params are expected to be in the original scale
@@ -1770,9 +1774,12 @@ class CrowPeas:
 
         return hessian
 
-    def get_MLP_uncertainty(self):
-        #predictions = self.run_predictions()
-        predictions = self.run_predictions_S()
+    def get_MLP_uncertainty(self, sequence = False):
+        if not sequence:
+            predictions = self.run_predictions()
+        else:
+            predictions = self.run_predictions_S()
+        
         self.mlp_uncertainties = []
 
         for idx, pred in enumerate(predictions):
@@ -1822,7 +1829,7 @@ class CrowPeas:
             #print(f"Condition Number of Regularized Hessian (Prediction {idx}):", condition_number)
             #condition_number = np.linalg.cond(normalized_hessian)
             #print(f"Condition Number of Normalized Hessian (Prediction {idx}):", condition_number)
-        #print("Uncertainties:", uncertainties)
+            print("Uncertainties:", uncertainty)
 
 
     def model_summary(self):
@@ -2304,93 +2311,6 @@ class CrowPeas:
         plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
         plt.close()
 
-
-    # def visualize_noise_impact(self, sequence_length=20, noise_levels=[10,20,30,40,50,75,100], n_trials=5):
-    #     vary_dict = {"degen": (5,12,"sinusoidal"), 
-    #                 "deltar": (-0.02,0.00,"quadratic"), 
-    #                 "sigma2": (0.003,0.01,"log"), 
-    #                 "e0": (5,5,"sqrt")}
-    #     const_dict = {"s02": 1}
-
-    #     # Generate clean reference data
-    #     clean_seq, true_params = self.synthetic_spectra.generate_glitched_sequence(
-    #         feff_path_file=self.feff_path_file,
-    #         sequence_length=sequence_length,
-    #         parameter_profiles=vary_dict,
-    #         fixed_parameters=const_dict,
-    #         n_glitches=10
-    #     )
-        
-    #     # Get clean predictions
-    #     normalized_clean, _ = normalize_spectra(clean_seq, self.norm_params_spectra)
-    #     normalized_clean = torch.tensor(normalized_clean)
-    #     with torch.no_grad():
-    #         clean_predictions = self.model(normalized_clean.to(self.model.device)).cpu().numpy()
-
-    #     # Setup plot
-    #     fig = plt.figure(figsize=(20, 10))
-    #     gs = gridspec.GridSpec(2, 4, figure=fig)
-    #     param_names = ['Coordination Number', 'ΔR', '$\sigma^2$', '$E_0$']
-    #     ylims = [(4, 13), (-0.025, 0.005), (0.0015, 0.011), (2.5, 7.5)]
-        
-    #     # Plot top row (clean data)
-    #     for i in range(4):
-    #         ax = fig.add_subplot(gs[0, i])
-    #         ax.plot(true_params[:, i], '-', label='True', color='blue')
-    #         ax.plot(clean_predictions[:, i], '--', label='Predicted', color='black')
-    #         ax.set_title(param_names[i])
-    #         ax.set_xlabel('Spectra Index')
-    #         ax.set_ylabel('Value')
-    #         ax.set_ylim(ylims[i])
-    #         ax.legend()
-
-    #     # Plot bottom row (noisy predictions)
-    #     colors = plt.cm.viridis(np.linspace(0, 1, len(noise_levels)))
-    #     for i in range(4):
-    #         ax = fig.add_subplot(gs[1, i])
-    #         ax.plot(true_params[:, i], '-', label='True', color='blue')
-            
-    #         for idx, n_glitches in enumerate(noise_levels):
-    #             noisy_predictions = []
-    #             for _ in range(n_trials):
-    #                 noisy_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
-    #                     feff_path_file=self.feff_path_file,
-    #                     sequence_length=sequence_length,
-    #                     parameter_profiles=vary_dict,
-    #                     fixed_parameters=const_dict,
-    #                     n_glitches=n_glitches
-    #                 )
-    #                 normalized_noisy, _ = normalize_spectra(noisy_seq, self.norm_params_spectra)
-    #                 normalized_noisy = torch.tensor(normalized_noisy)
-    #                 with torch.no_grad():
-    #                     pred = self.model(normalized_noisy.to(self.model.device)).cpu().numpy()
-    #                 noisy_predictions.append(pred)
-                
-    #             predictions = np.array(noisy_predictions)
-    #             mean_pred = np.mean(predictions, axis=0)
-    #             std_pred = np.std(predictions, axis=0)
-                
-    #             ax.fill_between(range(sequence_length), 
-    #                         mean_pred[:, i] - std_pred[:, i],
-    #                         mean_pred[:, i] + std_pred[:, i],
-    #                         alpha=0.2, color=colors[idx])
-    #             ax.plot(mean_pred[:, i], '--', color=colors[idx], 
-    #                 label=f'{n_glitches} glitches')
-            
-    #         ax.set_title(f'Noisy {param_names[i]}')
-    #         ax.set_xlabel('Spectra Index')
-    #         ax.set_ylabel('Value')
-    #         ax.set_ylim(ylims[i])
-    #         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    #     plt.tight_layout()
-    #     save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_impact_glitch"
-    #     plt.savefig(save_path + ".png", dpi=300, bbox_inches='tight')
-    #     plt.savefig(save_path + ".svg", dpi=300, bbox_inches='tight')
-    #     plt.close()
-
-
-
     def plot_loss_curves(self, metrics_file, train_rate=7, val_rate=80, best_rate=1):
         """
         Plots training, validation, and best validation loss curves in a colorblind-friendly manner with a log scale.
@@ -2427,44 +2347,52 @@ class CrowPeas:
         plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
         plt.close()
 
-    # def plot_loss_curves(self, metrics_file, train_window=50, val_window=100, best_window=10):
-    #     """
-    #     Plots smoothed training, validation, and best validation loss curves using rolling averages.
+
+    def laplace(self):
+
+        self.la = Laplace(self.model, "regression",
+                    subset_of_weights="all",
+                    hessian_structure="diag")
+        self.la.fit(self.data_loader.train_dataloader(batch_size=16))
+        self.la.optimize_prior_precision(
+            method="gridsearch",
+            pred_type="glm",
+            link_approx="probit",
+            val_loader=self.data_loader.val_dataloader(batch_size=16),
+        )
+
+    def get_MLP_predictions_laplace(self, sequence = False):
+
+        self.laplace()
+
+        if not sequence:
+            predictions = self.run_predictions()
+        else:
+            predictions = self.run_predictions_S()
         
-    #     Args:
-    #         metrics_file (str): Path to the CSV file containing metrics data.
-    #         train_window (int): Window size for training loss smoothing. Default: 50.
-    #         val_window (int): Window size for validation loss smoothing. Default: 25.
-    #         best_window (int): Window size for best validation loss smoothing. Default: 10.
-    #     """
-    #     # Load the data
-    #     data = pd.read_csv(metrics_file)
-        
-    #     # Apply rolling average smoothing
-    #     train_smooth = data['train/loss'].rolling(window=train_window, min_periods=1).mean()
-    #     val_smooth = data['val/loss'].rolling(window=val_window, min_periods=1).mean()
-    #     best_smooth = data['val/loss_best'].rolling(window=best_window, min_periods=1).mean()
-        
-    #     # Plotting
-    #     plt.figure(figsize=(8, 6))
-        
-    #     # Use colorblind-friendly colors with smoothed data
-    #     plt.plot(data['epoch'], train_smooth, 
-    #             label="Training Loss", color="#D55E00")
-    #     plt.plot(data['epoch'], val_smooth, 
-    #             label="Validation Loss", color="#0072B2")
-    #     plt.plot(data['epoch'], best_smooth, 
-    #             label="Best Validation Loss", linestyle='--', color="#009E73")
-        
-    #     plt.yscale('log')
-    #     plt.xlabel("Epoch")
-    #     plt.ylabel("Log(Loss)")
-    #     plt.legend()
-    #     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    #     plt.tight_layout()
-    #     plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.png")
-    #     plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
-    #     plt.close()
+        self.mlp_pred_laplace = []
+
+        for idx, pred in enumerate(predictions):
+            normalized_chi_k = pred['normalized_chi_k']
+            normalized_chi_k = torch.tensor(normalized_chi_k)
+            #print(normalized_chi_k.shape)
+            pred, covar_matrix = self.la(normalized_chi_k, pred_type="glm", link_approx="probit")
+            pred = pred.cpu().numpy()
+            cov_matrix = covar_matrix[0]
+            variances = torch.diagonal(cov_matrix)
+            uncertainties = torch.sqrt(variances) # values might be negative. bad.
+            uncertainties = uncertainties.cpu().numpy()
+            result = [pred, uncertainties]
+
+            self.mlp_pred_laplace.append(result)
+
+            # Optional debugging
+            #condition_number = np.linalg.cond(regularized_hessian)
+            #print(f"Condition Number of Regularized Hessian (Prediction {idx}):", condition_number)
+            #condition_number = np.linalg.cond(normalized_hessian)
+            #print(f"Condition Number of Normalized Hessian (Prediction {idx}):", condition_number)
+            print("Uncertainties:", self.mlp_pred_laplace)
+
 
 class HistoryLogger(pl.Callback):
     def __init__(self, history):
@@ -2472,10 +2400,10 @@ class HistoryLogger(pl.Callback):
         self.history = history
         
     def on_train_epoch_end(self, trainer, pl_module):
-        self.history["train_loss"].append(trainer.callback_metrics["train_loss"].item())
+        self.history["train/loss"].append(trainer.callback_metrics["train/loss"].item())
         
     def on_validation_epoch_end(self, trainer, pl_module):
-        self.history["val_loss"].append(trainer.callback_metrics["val_loss"].item())
+        self.history["val/loss"].append(trainer.callback_metrics["val/loss"].item())
 
     def plot_chi(self, dataset_dir):
         data = read_ascii(dataset_dir)
@@ -2513,51 +2441,59 @@ class HistoryLogger(pl.Callback):
         plt_t.show()
 
 
-
-
-
-
 def main():
 
-    path = "/home/nick/Projects/crowpeas/tests/read_seq/training10k_qspace.toml"
+    path = "/home/nick/Projects/crowpeas/tests/full_run/training10k_qspace.toml"
     print(path)
     crowpeas = CrowPeas()
-    # (
+
+    # (        # train loop
     #     crowpeas.load_config(path)
     #     .load_and_validate_config()
     #     .init_synthetic_spectra()
     #     .save_training_data()
-    #     .save_config(path)
+    #     .prepare_dataloader()
+    #     .save_config()
+    #     .train()
+    #     .load_model()
+    #     .validate_model()
+
     # )
-    #
-    (
+    #crowpeas.plot_training_history()
+
+    # (        # testing loop
+    #     crowpeas.load_config(path)
+    #     .load_and_validate_config()
+    #     .load_synthetic_spectra()
+    #     .prepare_dataloader()
+    #     .load_model()
+
+    # )
+    # crowpeas.plot_parity()
+    # crowpeas.plot_results()
+
+    (        # testing loop laplace
         crowpeas.load_config(path)
         .load_and_validate_config()
-        #.init_synthetic_spectra()
-        #.save_training_data()
-        .save_config()
         .load_synthetic_spectra()
-        #.prepare_dataloader()
-        #.save_config()
-
-        #.train() # training
+        .prepare_dataloader()
         .load_model()
-        #.print_model_info()
+        .get_MLP_predictions_laplace()
 
-        #.validate_model()
-        
-        #.run_predictions_S()
-        #.plot_results()
     )
+    #crowpeas.plot_parity()
+    #crowpeas.plot_results()
+
     #crowpeas.print_training_example()
     #crowpeas.print_seq_example()
-    crowpeas.analyze_noise_sensitivity_method2()
-    crowpeas.visualize_noise_levels()
+    #crowpeas.analyze_noise_sensitivity_method2()
+    #crowpeas.visualize_noise_levels()
     #crowpeas.plot_loss_curves("/home/nick/Projects/crowpeas/MLP_Rh/lightning_logs/version_4/metrics.csv")
     #crowpeas.visualize_noise_impact()
+    #crowpeas.plot_parity()
     #crowpeas.plot_parity2()
     #crowpeas.plot_training_history()
-    #crowpeas.plot_results()
+
 
 if __name__ == "__main__":
     main()

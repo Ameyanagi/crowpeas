@@ -185,57 +185,110 @@ class MLP(pl.LightningModule):
             if i < len(hidden_layers):
                 setattr(self, f"activation_{i}", self.activation())
 
-    def forward(self, x):
-        batch_size = x.shape[0]
+    def forward(self, x): # new forward function that keeps everything on the device
+            batch_size = x.shape[0]
 
-        # Pad input to nfft
-        padded_x = torch.zeros(batch_size, self.nfft, dtype=torch.complex64).to(x)
-        padded_x[:, : x.shape[1]] = (
-            x * self.window.unsqueeze(0) if self.window is not None else x
-        )
+            # Pad input to nfft and ensure on device
+            padded_x = torch.zeros(batch_size, self.nfft, dtype=torch.complex64, device=self.device)
+            if self.window is not None:
+                window = self.window.to(self.device)
+                padded_x[:, : x.shape[1]] = x.to(self.device) * window.unsqueeze(0)
+            else:
+                padded_x[:, : x.shape[1]] = x.to(self.device)
 
-        # Perform FFT
-        fft = torch.fft.fft(padded_x, dim=1)
-        fft = self.fft_c1 * fft[:, : self.nfft_t // 2]
-        fft = fft / self.fft_c2
+            # Perform FFT
+            fft = torch.fft.fft(padded_x, dim=1)
+            fft = self.fft_c1.to(self.device) * fft[:, : self.nfft_t // 2]
+            fft = fft / self.fft_c2.to(self.device)
 
-        # Prepare for IFFT
-        padded_fft = torch.zeros(
-            batch_size, self.nfft, dtype=torch.complex64, device=self.device
-        )
-        padded_fft[:, : fft.shape[1]] = fft
-
-        # Perform IFFT
-        r_factor = self.r_**self.rw
-        window_r_factor = self.window_r if self.window_r is not None else 1
-
-        if self.input_form == "r":
-            # try r space
-            r_space_input = padded_fft * window_r_factor * r_factor.unsqueeze(0)
-
-            r_space_input_con = torch.cat(
-                (r_space_input.real, r_space_input.imag), dim=1
+            # Prepare for IFFT
+            padded_fft = torch.zeros(
+                batch_size, self.nfft, dtype=torch.complex64, device=self.device
             )
-            out = self.fc0(r_space_input_con)
-        else:
-            ffti = self.ffti_c1 * torch.fft.ifft(
-                padded_fft * window_r_factor * r_factor.unsqueeze(0), dim=1, norm=None
-            )
-            ffti = ffti[:, : torch.floor(self.nfft_t / 2).long()]
-            ffti = ffti[:, : self.nkpts]
-            ffti_conc = torch.cat((ffti.real, ffti.imag), dim=1)
-            out = self.fc0(ffti_conc)
-        # Pass through Bayesian neural network layers
+            padded_fft[:, : fft.shape[1]] = fft
 
-        out = self.activation_0(out)
+            # Perform IFFT
+            r_factor = (self.r_.to(self.device))**self.rw
+            window_r_factor = self.window_r.to(self.device) if self.window_r is not None else 1
 
-        for i in range(1, len(self.hidden_layers)):
-            out = getattr(self, f"fc{i}")(out)
-            out = getattr(self, f"activation_{i}")(out)
+            if self.input_form == "r":
+                # try r space
+                r_space_input = padded_fft * window_r_factor * r_factor.unsqueeze(0)
+                r_space_input_con = torch.cat(
+                    (r_space_input.real, r_space_input.imag), dim=1
+                )
+                out = self.fc0(r_space_input_con)
+            else:
+                ffti = self.ffti_c1.to(self.device) * torch.fft.ifft(
+                    padded_fft * window_r_factor * r_factor.unsqueeze(0), dim=1, norm=None
+                )
+                ffti = ffti[:, : torch.floor(self.nfft_t / 2).long()]
+                ffti = ffti[:, : self.nkpts]
+                ffti_conc = torch.cat((ffti.real, ffti.imag), dim=1)
+                out = self.fc0(ffti_conc)
 
-        out = getattr(self, f"fc{len(self.hidden_layers) }")(out)
+            # Pass through Bayesian neural network layers
+            out = self.activation_0(out)
 
-        return out
+            for i in range(1, len(self.hidden_layers)):
+                out = getattr(self, f"fc{i}")(out)
+                out = getattr(self, f"activation_{i}")(out)
+
+            out = getattr(self, f"fc{len(self.hidden_layers)}")(out)
+
+            return out
+
+    # def forward(self, x): # old function with some device issues
+    #     batch_size = x.shape[0]
+
+    #     # Pad input to nfft
+    #     padded_x = torch.zeros(batch_size, self.nfft, dtype=torch.complex64).to(x)
+    #     padded_x[:, : x.shape[1]] = (
+    #         x * self.window.unsqueeze(0) if self.window is not None else x
+    #     )
+
+    #     # Perform FFT
+    #     fft = torch.fft.fft(padded_x, dim=1)
+    #     fft = self.fft_c1 * fft[:, : self.nfft_t // 2]
+    #     fft = fft / self.fft_c2
+
+    #     # Prepare for IFFT
+    #     padded_fft = torch.zeros(
+    #         batch_size, self.nfft, dtype=torch.complex64, device=self.device
+    #     )
+    #     padded_fft[:, : fft.shape[1]] = fft
+
+    #     # Perform IFFT
+    #     r_factor = self.r_**self.rw
+    #     window_r_factor = self.window_r if self.window_r is not None else 1
+
+    #     if self.input_form == "r":
+    #         # try r space
+    #         r_space_input = padded_fft * window_r_factor * r_factor.unsqueeze(0)
+
+    #         r_space_input_con = torch.cat(
+    #             (r_space_input.real, r_space_input.imag), dim=1
+    #         )
+    #         out = self.fc0(r_space_input_con)
+    #     else:
+    #         ffti = self.ffti_c1 * torch.fft.ifft(
+    #             padded_fft * window_r_factor * r_factor.unsqueeze(0), dim=1, norm=None
+    #         )
+    #         ffti = ffti[:, : torch.floor(self.nfft_t / 2).long()]
+    #         ffti = ffti[:, : self.nkpts]
+    #         ffti_conc = torch.cat((ffti.real, ffti.imag), dim=1)
+    #         out = self.fc0(ffti_conc)
+    #     # Pass through Bayesian neural network layers
+
+    #     out = self.activation_0(out)
+
+    #     for i in range(1, len(self.hidden_layers)):
+    #         out = getattr(self, f"fc{i}")(out)
+    #         out = getattr(self, f"activation_{i}")(out)
+
+    #     out = getattr(self, f"fc{len(self.hidden_layers) }")(out)
+
+    #     return out
 
     def on_train_start(self) -> None:
         self.val_loss.reset()
