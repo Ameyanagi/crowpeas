@@ -7,6 +7,7 @@ import math
 from typing import Sequence, Literal
 import json
 import pandas as pd
+import numdifftools as nd
 
 from .data_generator import SyntheticSpectrum
 from .data_generatorS import SyntheticSpectrumS
@@ -23,6 +24,9 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
 from torchinfo import torchinfo
 from laplace import Laplace
+from scipy.stats import multivariate_normal
+import itertools
+from scipy.integrate import nquad
 
 from .utils import (
     normalize_data,
@@ -1299,7 +1303,6 @@ class CrowPeas:
         return data
 
     def process_exp_data(self, data):
-        k_weight = self.k_weight
         kmin = self.k_range[0]
         kmax = self.k_range[1]
         rmin = self.r_range[0]
@@ -1311,10 +1314,20 @@ class CrowPeas:
         xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
         xftr(data, rmin=rmin, rmax=rmax)
 
-        if k_weight == 2:
+        if k_weight == 0:
+            interpolated_chi_k = interpolate_spectrum(data.k, data.chi, k_grid)
+
+        elif k_weight == 1:
+            data.chi1 = data.chi * data.k
+            interpolated_chi_k = interpolate_spectrum(data.k, data.chi1, k_grid)
+
+        elif k_weight == 2:
             data.chi2 = data.chi * data.k ** 2
+            interpolated_chi_k = interpolate_spectrum(data.k, data.chi2, k_grid)
+
+        else:
+            raise ValueError(f"Invalid k-weight, {k_weight}, type {type(k_weight)}")
         
-        interpolated_chi_k = interpolate_spectrum(data.k, data.chi2, k_grid)
         interpolated_chi_k = torch.tensor(interpolated_chi_k).unsqueeze(0)
         xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
         xftr(data, rmin=rmin, rmax=rmax)
@@ -1569,6 +1582,7 @@ class CrowPeas:
 
         network_type = self.config["neural_network"]["architecture"]["type"]
         if network_type == "MLP" or network_type == "NODE":
+            print("Calculating MLP uncertainties")
             self.get_MLP_uncertainty()
             for idx,pred in enumerate(predictions):
                 pred['uncertainty_a'], pred['uncertainty_deltar'], pred['uncertainty_sigma2'], pred['uncertainty_e0'] = self.mlp_uncertainties[idx]
@@ -1698,24 +1712,25 @@ class CrowPeas:
         plt.close(fig_q)
 
     def plot_training_history(self, save_path="/training_history.png"):
+            import numpy as np
+            
+            save_path = os.path.join(self.config_dir, self.output_dir) + save_path
 
-        save_path = os.path.join(self.config_dir, self.output_dir) + save_path
-
-        """Plot training and validation loss curves"""
-        plt.figure(figsize=(10, 6))
-        plt.plot(self.history["train/loss"], label="Training Loss")
-        plt.plot(self.history["val/loss"], label="Validation Loss")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title("Training History")
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path)
-        
-        return plt.gcf()
+            """Plot training and validation loss curves using log scale"""
+            plt.figure(figsize=(10, 6))
+            plt.plot(np.log(self.history["train/loss"]), label="Training Loss")
+            plt.plot(np.log(self.history["val/loss"]), label="Validation Loss")
+            plt.xlabel("Epoch")
+            plt.ylabel("Log Loss")
+            plt.title("Training History (Log Scale)")
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path)
+            
+            return plt.gcf()
 
  
 
@@ -1730,11 +1745,348 @@ class CrowPeas:
     #         mse_list.append(mse)
     #     return np.mean(mse_list), np.std(mse_list)
 
+
+
+    def visualize_uncertainty_estimation2(self, prediction, param1_name, param2_name, scale_factor=0.1):
+        """
+        Visualizes the effect of parameter perturbations on the EXAFS spectrum and the objective function landscape.
+
+        Args:
+            prediction (dict): A dictionary containing the predicted parameters and the interpolated EXAFS spectrum.
+                            It should have keys like 'predicted_a', 'predicted_deltar', etc., and 'interpolated_chi_q'.
+            param1_name (str): The name of the first parameter to visualize (e.g., 'predicted_a').
+            param2_name (str): The name of the second parameter to visualize (e.g., 'predicted_deltar').
+            scale_factor (float): The scaling factor for parameter perturbations.
+        """
+
+        # 1. Parameter Perturbation and Resulting Spectra
+        plt.figure(figsize=(14, 6))
+
+        plt.subplot(1, 2, 1)
+
+        # Original spectrum
+        original_params = [prediction['predicted_a'], prediction['predicted_deltar'], 
+                        prediction['predicted_sigma2'], prediction['predicted_e0']]
+        original_spectrum = self.build_synth_spectra(original_params)
+        k_values = self.nn_k_grid
+        k_values = np.array(k_values, dtype=np.float32)
+
+        plt.plot(k_values, original_spectrum, label='Original', linewidth=2)
+
+        # Perturb parameters and plot spectra
+        param1_idx = ['predicted_a', 'predicted_deltar', 'predicted_sigma2', 'predicted_e0'].index(param1_name)
+        param2_idx = ['predicted_a', 'predicted_deltar', 'predicted_sigma2', 'predicted_e0'].index(param2_name)
+        
+        param1_val = prediction[param1_name]
+        param2_val = prediction[param2_name]
+
+        epsilon1 = scale_factor * (abs(param1_val) if abs(param1_val) > 1e-8 else 1e-6)
+        epsilon2 = scale_factor * (abs(param2_val) if abs(param2_val) > 1e-8 else 1e-6)
+
+        for sign in [-1, 1]:
+            print("og ", original_params)
+            perturbed_params = original_params.copy()
+            
+            perturbed_params[param1_idx] += sign * epsilon1
+            print("perturbed ", perturbed_params)
+            perturbed_spectrum = self.build_synth_spectra(perturbed_params)
+            plt.plot(k_values, perturbed_spectrum, linestyle='--', label=f'{param1_name} {"+" if sign == 1 else "-"}{epsilon1:.2e}')
+
+            perturbed_params = original_params.copy()
+            perturbed_params[param2_idx] += sign * epsilon2
+            perturbed_spectrum = self.build_synth_spectra(perturbed_params)
+            plt.plot(k_values, perturbed_spectrum, linestyle=':', label=f'{param2_name} {"+" if sign == 1 else "-"}{epsilon2:.2e}')
+
+        plt.xlabel('k (Wave Vector)')
+        plt.ylabel('χ(k) (EXAFS Signal)')
+        plt.title('EXAFS Spectra with Parameter Perturbations')
+        plt.legend()
+
+        # 2. Objective Function Landscape (Contour Plot)
+        plt.subplot(1, 2, 2)
+
+        param1_range = np.linspace(param1_val - 5 * epsilon1, param1_val + 5 * epsilon1, 30)
+        param2_range = np.linspace(param2_val - 5 * epsilon2, param2_val + 5 * epsilon2, 30)
+        
+        param1_grid, param2_grid = np.meshgrid(param1_range, param2_range)
+        mse_grid = np.zeros_like(param1_grid)
+
+        for i in range(param1_grid.shape[0]):
+            for j in range(param1_grid.shape[1]):
+                perturbed_params = original_params.copy()
+                perturbed_params[param1_idx] = param1_grid[i, j]
+                perturbed_params[param2_idx] = param2_grid[i, j]
+                mse_grid[i, j] = self.objective(prediction['interpolated_chi_q'], perturbed_params)
+
+        contour = plt.contourf(param1_grid, param2_grid, mse_grid, levels=50, cmap='viridis')
+        plt.colorbar(contour, label='MSE')
+        plt.plot(param1_val, param2_val, 'ro', markersize=8, label='Predicted Values')
+
+        plt.xlabel(param1_name)
+        plt.ylabel(param2_name)
+        plt.title('Objective Function Landscape')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + f'/uncertainty_{param1_name}_{param2_name}.png')
+        plt.close()
+
+    def visualize_4d_objective_landscape(self, prediction, id, scale_factor=0.2):
+        """
+        Visualizes the 4D objective function landscape by creating 2D contour plots 
+        for all pairs of parameters, holding the other two parameters constant at their predicted values.
+
+        Args:
+            prediction (dict): A dictionary containing the predicted parameters and the interpolated EXAFS spectrum.
+            scale_factor (float): The scaling factor for parameter perturbations.
+        """
+
+        param_names = ['predicted_a', 'predicted_deltar', 'predicted_sigma2', 'predicted_e0']
+        original_params = [prediction[name] for name in param_names]
+
+        # artemis_a, artemis_r, artemis_s, artemis_e = prediction['artemis_result']
+        # artemis_dict = {
+        #     'predicted_a': artemis_a,
+        #     'predicted_deltar': artemis_r,
+        #     'predicted_sigma2': artemis_s,
+        #     'predicted_e0': artemis_e
+        # }
+
+        # Generate all unique pairs of parameters
+        param_pairs = list(itertools.combinations(param_names, 2))
+        #artemis_pairs = list(itertools.combinations(artemis_dict.keys(), 2))
+
+        plt.figure(figsize=(18, 12))
+
+        plot_num = 1
+        for pair in param_pairs:
+            param1_name, param2_name = pair
+            param1_idx = param_names.index(param1_name)
+            param2_idx = param_names.index(param2_name)
+
+            param1_val = prediction[param1_name]
+            param2_val = prediction[param2_name]
+
+            #artemis_param1 = artemis_dict[param1_name]
+            #artemis_param2 = artemis_dict[param2_name]
+
+
+            epsilon1 = scale_factor * (abs(param1_val) if abs(param1_val) > 1e-8 else 1e-6)
+            epsilon2 = scale_factor * (abs(param2_val) if abs(param2_val) > 1e-8 else 1e-6)
+
+            param1_range = np.linspace(param1_val - 5 * epsilon1, param1_val + 5 * epsilon1, 30)
+            param2_range = np.linspace(param2_val - 5 * epsilon2, param2_val + 5 * epsilon2, 30)
+
+            param1_grid, param2_grid = np.meshgrid(param1_range, param2_range)
+            mse_grid = np.zeros_like(param1_grid)
+
+            for i in range(param1_grid.shape[0]):
+                for j in range(param1_grid.shape[1]):
+                    perturbed_params = original_params.copy()
+                    perturbed_params[param1_idx] = param1_grid[i, j]
+                    perturbed_params[param2_idx] = param2_grid[i, j]
+                    mse_grid[i, j] = self.objective(prediction['interpolated_chi_q'], perturbed_params)
+
+            plt.subplot(2, 3, plot_num)  # 2 rows, 3 columns of plots
+            contour = plt.contourf(param1_grid, param2_grid, mse_grid, levels=50, cmap='viridis')
+            plt.colorbar(contour, label='MSE')
+            plt.plot(param1_val, param2_val, 'ro', markersize=8, label='Predicted Values')
+            #plt.plot(artemis_param1, artemis_param2, 'bo', markersize=8, label='Artemis Values')
+
+
+            plt.xlabel(param1_name)
+            plt.ylabel(param2_name)
+            plt.title(f'Objective Landscape: {param1_name} vs {param2_name}')
+            plt.legend()
+
+            plot_num += 1
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + f'/uncertainty_{id}.png')
+        plt.close()
+
+
+
+    def visualize_uncertainty_of_A(self, prediction, uncertainties, id, scale_factor=0.2):
+        """
+        Visualizes the uncertainty of parameter 'A' along with a 2D slice of the objective landscape.
+        """
+        param_names = ['predicted_a', 'predicted_deltar', 'predicted_sigma2', 'predicted_e0']
+        original_params = [prediction[name] for name in param_names]
+        a_idx = param_names.index('predicted_a')
+        uncertainty_a = uncertainties[a_idx]
+
+        # Choose two parameters for the 2D slice (e.g., deltar and sigma2)
+        param1_name, param2_name = 'predicted_deltar', 'predicted_sigma2' 
+        param1_idx = param_names.index(param1_name)
+        param2_idx = param_names.index(param2_name)
+        param1_val = prediction[param1_name]
+        param2_val = prediction[param2_name]
+
+        # Ensure that e0 is fixed at its predicted value for the 2D slice
+        e0_idx = param_names.index('predicted_e0')
+        e0_val = prediction['predicted_e0']
+
+        epsilon1 = scale_factor * (abs(param1_val) if abs(param1_val) > 1e-8 else 1e-6)
+        epsilon2 = scale_factor * (abs(param2_val) if abs(param2_val) > 1e-8 else 1e-6)
+
+        param1_range = np.linspace(param1_val - 5 * epsilon1, param1_val + 5 * epsilon1, 30)
+        param2_range = np.linspace(param2_val - 5 * epsilon2, param2_val + 5 * epsilon2, 30)
+
+        param1_grid, param2_grid = np.meshgrid(param1_range, param2_range)
+        mse_grid = np.zeros_like(param1_grid)
+
+        for i in range(param1_grid.shape[0]):
+            for j in range(param1_grid.shape[1]):
+                perturbed_params = original_params.copy()
+                perturbed_params[param1_idx] = param1_grid[i, j]
+                perturbed_params[param2_idx] = param2_grid[i, j]
+                perturbed_params[a_idx] = original_params[a_idx]  # Keep 'A' fixed
+                perturbed_params[e0_idx] = e0_val  # Keep 'E0' fixed
+                mse_grid[i, j] = self.objective(prediction['interpolated_chi_q'], perturbed_params)
+
+        # Create the plots
+        fig, axes = plt.subplots(1, 2, figsize=(8, 3), gridspec_kw={'width_ratios': [3, 1]})
+
+        # 2D Slice
+        contour = axes[0].contourf(param1_grid, param2_grid, mse_grid, levels=50, cmap='viridis')
+        plt.colorbar(contour, ax=axes[0], label='MSE')
+        axes[0].plot(param1_val, param2_val, 'ro', markersize=8, label='Predicted Values')
+        axes[0].set_xlabel("$\Delta$R")
+        axes[0].set_ylabel('$\sigma^{2}$')
+        axes[0].set_title('Objective Landscape around fixed A and $\Delta E_{0}$')
+        # make fonts larger
+        axes[0].tick_params(axis='both', which='major', labelsize=8)
+
+
+        # Uncertainty of 'A'
+        axes[1].errorbar(0, prediction['predicted_a'], yerr=uncertainty_a, fmt='ro', markersize=8, capsize=5, elinewidth=2)
+        axes[1].set_xticks([])  # Remove x-ticks
+        axes[1].set_ylabel('A')
+        axes[1].set_title('Uncertainty of A')
+        axes[1].set_xlim([-1, 1])
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + f'/uncertainty_A_{id}.png', dpi=300)
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + f'/uncertainty_A_{id}.svg')
+        plt.close()
+
+
     def objective(self, EXAFS_experiment, params):
         # params are expected to be in the original scale
         synth_EXAFS = self.build_synth_spectra(params)
         mse = self.get_MSE_error(EXAFS_experiment, synth_EXAFS)
         return mse
+
+    # def compute_hessian_with_numdifftools(self, EXAFS_experiment, params, sigma=None):
+    #     """
+    #     Uses numdifftools to compute the Hessian of the chi-squared objective 
+    #     with respect to 'params'.
+    #     """
+    #     def wrapped(p):
+    #         return self.objective_chisq(EXAFS_experiment, p, sigma=sigma)
+
+    #     Hfun = nd.Hessian(wrapped, method='central')
+    #     return Hfun(params)
+
+    def objective_chisq(self, EXAFS_experiment, params, sigma=None):
+        """
+        Objective function returning the chi-squared:
+            chi2 = sum( ((y_i - f_i)/sigma_i)^2 ).
+
+        Parameters
+        ----------
+        EXAFS_experiment : array-like
+            Experimental EXAFS data over k-range.
+        params : list or array
+            Parameter values for building the synthetic spectrum.
+        sigma : array-like or float, optional
+            Uncertainties in the experimental data. If None or scalar, 
+            assume a constant sigma for all points.
+
+        Returns
+        -------
+        chi2 : float
+            The chi-squared value (not reduced).
+        """
+        # 1) Build synthetic EXAFS
+        synth_EXAFS = self.build_synth_spectra(params)
+
+        # 2) Get data in the k-range
+        kmin, kmax = self.k_range
+        k_grid = np.array(self.config["neural_network"]["k_grid"], dtype=np.float32)
+
+        exp_in_range = [val for (k, val) in zip(k_grid, EXAFS_experiment) 
+                        if kmin <= k <= kmax]
+        synth_in_range = [val for (k, val) in zip(k_grid, synth_EXAFS) 
+                          if kmin <= k <= kmax]
+
+        exp_in_range = np.array(exp_in_range)
+        synth_in_range = np.array(synth_in_range)
+
+        # 3) If sigma is None, assume sigma = 1.0 for all points
+        if sigma is None:
+            sigma = 1.0
+        if np.isscalar(sigma):
+            sigma_array = np.full_like(exp_in_range, fill_value=sigma, dtype=float)
+        else:
+            sigma_array = np.array(sigma, dtype=float)
+
+        # 4) Compute chi^2 (no division by N or N - p)
+        residuals = (synth_in_range - exp_in_range) / sigma_array
+        chi2 = np.sum(residuals**2)
+
+        return chi2
+
+
+
+    # def compute_hessian_with_numdifftools(self, EXAFS_experiment, params, min_scale=1e-6):
+    #     """
+    #     Computes the Hessian of 'self.objective' at the given 'params' in original units
+    #     using numdifftools, but internally normalizes parameters to improve numerical stability.
+
+    #     Parameters
+    #     ----------
+    #     EXAFS_experiment : array-like
+    #         Your experimental data.
+    #     params : list or array
+    #         The parameter values in their original units.
+    #     min_scale : float
+    #         Minimum absolute scale to use if a parameter is near zero.
+
+    #     Returns
+    #     -------
+    #     hessian : 2D numpy array
+    #         Hessian matrix in the original parameter units.
+    #     """
+
+    #     # 1) Figure out a per-parameter scaling factor
+    #     #    (avoid zero-scale by enforcing a minimal scale)
+    #     param_scales = [max(abs(p), min_scale) for p in params]
+
+    #     # 2) Define a wrapper that UN-normalizes before calling the real objective
+    #     def wrapped(norm_params):
+    #         # Convert normalized -> original
+    #         unnorm_params = [n * s for n, s in zip(norm_params, param_scales)]
+    #         return self.objective(EXAFS_experiment, unnorm_params)
+
+    #     # 3) Create normalized_params to pass into numdifftools
+    #     normalized_params = [p / s for p, s in zip(params, param_scales)]
+
+    #     # 4) Let numdifftools compute the Hessian in normalized space
+    #     Hfun = nd.Hessian(wrapped, method='central')
+    #     raw_hessian = Hfun(normalized_params)
+
+    #     # 5) Rescale Hessian back to original units.
+    #     #    For second derivatives, each entry scales as (scale_i * scale_j).
+    #     n = len(params)
+    #     hessian = np.zeros((n, n), dtype=float)
+    #     for i in range(n):
+    #         for j in range(n):
+    #             hessian[i, j] = raw_hessian[i, j] * param_scales[i] * param_scales[j]
+
+    #     return hessian
+
 
     def compute_hessian(self, func, EXAFS_experiment, params, scale_factor=0.01, max_scale=1.0):
         """
@@ -1774,8 +2126,218 @@ class CrowPeas:
 
         return hessian
 
+    # def compute_hessian_central(self, func, EXAFS_experiment, params,
+    #                             scale_factor=0.01, min_step=1e-6, max_scale=1.0):
+    #     """
+    #     Compute the Hessian matrix of a scalar function with respect to its parameters
+    #     using a central-difference approximation. Only the upper triangle is computed
+    #     (including the diagonal), and then the Hessian is symmetrized to fill in the lower.
+
+    #     Parameters
+    #     ----------
+    #     func : callable
+    #         The objective function signature: func(EXAFS_experiment, params).
+    #         'params' here are expected to be in original scale. We'll handle
+    #         the normalization/denormalization inside this function.
+    #     EXAFS_experiment : np.ndarray or similar
+    #         Experimental data needed by func.
+    #     params : list or np.ndarray
+    #         Normalized parameters. We'll denormalize them for each function call.
+    #     scale_factor : float
+    #         Multiplier for the parameter-based step size, e.g., 0.01 (1%).
+    #     min_step : float
+    #         Minimum absolute step size, to avoid too-small steps if a parameter is near zero.
+    #     max_scale : float
+    #         Used to denormalize parameters inside each function call.
+        
+    #     Returns
+    #     -------
+    #     hessian : np.ndarray
+    #         Approximation of the Hessian (n x n).
+    #     """
+
+    #     def denorm(pars):
+    #         return [p * max_scale for p in pars]
+        
+    #     n = len(params)
+    #     hessian = np.zeros((n, n), dtype=float)
+
+    #     for i in range(n):
+    #         # step size for parameter i in normalized space
+    #         eps_i = scale_factor * max(abs(params[i]), min_step)
+
+    #         for j in range(i, n):
+    #             # step size for parameter j in normalized space
+    #             eps_j = scale_factor * max(abs(params[j]), min_step)
+
+    #             # We want:
+    #             #   f(x + e_i + e_j), f(x + e_i - e_j),
+    #             #   f(x - e_i + e_j), f(x - e_i - e_j).
+
+    #             # Copy the base parameter set
+    #             p_plus_plus = params.copy()
+    #             p_plus_minus = params.copy()
+    #             p_minus_plus = params.copy()
+    #             p_minus_minus = params.copy()
+
+    #             p_plus_plus[i]  += eps_i
+    #             p_plus_plus[j]  += eps_j
+    #             p_plus_minus[i] += eps_i
+    #             p_plus_minus[j] -= eps_j
+    #             p_minus_plus[i] -= eps_i
+    #             p_minus_plus[j] += eps_j
+    #             p_minus_minus[i] -= eps_i
+    #             p_minus_minus[j] -= eps_j
+
+    #             f_pp = func(EXAFS_experiment, denorm(p_plus_plus))
+    #             f_pm = func(EXAFS_experiment, denorm(p_plus_minus))
+    #             f_mp = func(EXAFS_experiment, denorm(p_minus_plus))
+    #             f_mm = func(EXAFS_experiment, denorm(p_minus_minus))
+
+    #             # Central difference for mixed partial derivative:
+    #             # d^2 f / dx_i dx_j ≈ [f(x+ e_i + e_j) - f(x+ e_i - e_j)
+    #             #                     - f(x- e_i + e_j) + f(x- e_i - e_j)] / [4*eps_i*eps_j]
+    #             hessian[i, j] = (f_pp - f_pm - f_mp + f_mm) / (4.0 * eps_i * eps_j)
+
+    #             # For the diagonal terms (i == j), that same formula simplifies to
+    #             # a standard second derivative in one dimension. But the formula
+    #             # is consistent for all pairs.
+
+    #     # Symmetrize (since H should be symmetric if f is nicely behaved)
+    #     # We only did j in [i..n), so fill in the lower triangle.
+    #     for i in range(n):
+    #         for j in range(i):
+    #             hessian[i, j] = hessian[j, i]
+
+    #     return hessian
+
+    # def objective_reduced_chisq(self, EXAFS_experiment, params, sigma=None):
+    #     """
+    #     Objective function that returns the reduced chi-squared:
+    #         chi2_reduced = (1 / dof) * sum( ((y_i - f_i)/sigma_i)^2 )
+    #     where dof = N - p (p is number of free params, N is number of data points).
+        
+    #     Parameters
+    #     ----------
+    #     EXAFS_experiment : array-like
+    #         Experimental EXAFS data over k-range.
+    #     params : list or array
+    #         Parameter values for which we build the synthetic spectrum.
+    #     sigma : array-like or float, optional
+    #         Uncertainties in the experimental data. If None or scalar, 
+    #         we assume a constant sigma for all data points.
+
+    #     Returns
+    #     -------
+    #     chi2_reduced : float
+    #         The reduced chi-squared value.
+    #     """
+    #     # 1) Build synthetic EXAFS
+    #     synth_EXAFS = self.build_synth_spectra(params)
+
+    #     # 2) Restrict both data sets to the relevant k-range (similar to your get_MSE_error)
+    #     kmin, kmax = self.k_range
+    #     k_grid = np.array(self.config["neural_network"]["k_grid"], dtype=np.float32)
+
+    #     exp_in_range = [val for (k, val) in zip(k_grid, EXAFS_experiment) 
+    #                     if kmin <= k <= kmax]
+    #     synth_in_range = [val for (k, val) in zip(k_grid, synth_EXAFS) 
+    #                       if kmin <= k <= kmax]
+
+    #     exp_in_range = np.array(exp_in_range)
+    #     synth_in_range = np.array(synth_in_range)
+
+    #     # 3) Number of data points and parameters
+    #     N = len(exp_in_range)
+    #     p = len(params)
+    #     dof = max(1, N - p)  # avoid dividing by zero if N <= p
+
+    #     # 4) If sigma is None, assume constant sigma = 1
+    #     #    If sigma is a single float, apply it to every data point
+    #     #    If sigma is an array, it should match exp_in_range in length
+    #     if sigma is None:
+    #         sigma = 1.0
+    #     if np.isscalar(sigma):
+    #         sigma_array = np.full_like(exp_in_range, fill_value=sigma, dtype=float)
+    #     else:
+    #         sigma_array = np.array(sigma, dtype=float)
+        
+    #     # 5) Compute reduced chi-squared
+    #     #    sum of squared residuals, each normalized by sigma_i^2
+    #     residuals = (synth_in_range - exp_in_range) / sigma_array
+    #     chi2 = np.sum(residuals**2)
+    #     chi2_reduced = chi2 / dof
+
+    #     return chi2_reduced
+
+    # def compute_covariance_matrix(self, EXAFS_experiment, params, lambda_reg=1e-6):
+    #     """
+    #     Example method to invert the Hessian to get a covariance matrix,
+    #     with an optional small regularization term on the diagonal.
+    #     If your objective is e.g. sum of squares, you might multiply
+    #     by N/2 (depending on how you define it).
+    #     """
+    #     hessian = self.compute_hessian_with_numdifftools(EXAFS_experiment, params)
+
+    #     N = len(EXAFS_experiment)
+
+    #     # (Optional) regularize if near-singular
+    #     hessian_reg = hessian + np.eye(len(hessian)) * lambda_reg
+
+    #     #cov_matrix = np.linalg.inv(hessian_reg) * N / 2.0
+    #     cov_matrix = np.linalg.inv(hessian_reg)
+
+    #     return cov_matrix
+
+    # def compute_hessian_with_numdifftools(self, EXAFS_experiment, params, sigma=None, min_scale=1e-6):
+    #     """
+    #     Computes the Hessian of 'self.objective_chisq' at 'params' using numdifftools,
+    #     but includes parameter NORMALIZATION internally to avoid ill-conditioning.
+
+    #     Returns the Hessian in ORIGINAL (unnormalized) parameter units.
+    #     """
+    #     # 1) Determine scale for each parameter so they are ~O(1)
+    #     param_scales = [max(abs(p), min_scale) for p in params]
+
+    #     # 2) Define wrapper that expects normalized params, then un-normalizes them
+    #     def wrapped(norm_params):
+    #         # Convert normalized -> original
+    #         unnorm_params = [n * s for n, s in zip(norm_params, param_scales)]
+    #         return self.objective_chisq(EXAFS_experiment, unnorm_params, sigma=sigma)
+
+    #     # 3) Create normalized_params from the original ones
+    #     normalized_params = [p / s for p, s in zip(params, param_scales)]
+
+    #     # 4) Use numdifftools on the WRAPPED function
+    #     Hfun = nd.Hessian(wrapped, method='central')
+    #     raw_hessian = Hfun(normalized_params)
+
+    #     # 5) Rescale the Hessian to original units
+    #     n = len(params)
+    #     hessian = np.zeros((n, n), dtype=float)
+    #     for i in range(n):
+    #         for j in range(n):
+    #             hessian[i, j] = raw_hessian[i, j] * param_scales[i] * param_scales[j]
+
+    #     return hessian
+
+    # def compute_covariance_matrix(self, EXAFS_experiment, params, sigma=None, lambda_reg=1e-6):
+    #     """
+    #     Invert the Hessian from the chi-squared objective. The resulting inverse 
+    #     is the approximate covariance matrix (if your data uncertainties are 
+    #     properly accounted for).
+    #     """
+    #     hessian = self.compute_hessian_with_numdifftools(EXAFS_experiment, params, sigma=sigma)
+
+    #     # Regularize to handle near-singular cases
+    #     hessian_reg = hessian + np.eye(len(params)) * lambda_reg
+    #     cov_matrix = np.linalg.inv(hessian_reg)
+
+    #     return cov_matrix
+
     def get_MLP_uncertainty(self, sequence = False):
         if not sequence:
+            print("Calculating MLP uncertainties")
             predictions = self.run_predictions()
         else:
             predictions = self.run_predictions_S()
@@ -1801,7 +2363,7 @@ class CrowPeas:
 
             # Compute Hessian in normalized space
             normalized_hessian = self.compute_hessian(
-                self.objective, 
+                self.objective_chisq, 
                 interpolated_chi_q, 
                 normalized_params, 
                 scale_factor=0.005, 
@@ -1812,6 +2374,7 @@ class CrowPeas:
             # To convert back to the original parameters, multiply by (max_scale^2)
             # because Hessian second derivatives scale as 1/(units_of_params^2).
             hessian_rescaled = normalized_hessian * (max_scale ** 2)
+            print(f"max_scale = {max_scale}")
 
             # Regularize the Hessian for numerical stability
             lambda_reg = 1e-6
@@ -1820,9 +2383,20 @@ class CrowPeas:
             # Compute covariance matrix (inverse of Hessian)
             covariance_matrix = np.linalg.inv(regularized_hessian)
 
+            #covariance_matrix = self.compute_covariance_matrix(interpolated_chi_q, predicted_parameter_array)
+
             # Extract uncertainties as sqrt of diagonal of covariance
             uncertainty = np.sqrt(np.diag(covariance_matrix))
             self.mlp_uncertainties.append(uncertainty)
+
+            print(f"Uncertainties (Prediction {idx}):", uncertainty)
+
+            # Debug thing
+            #  # if uncertainty is too large, make it zero. too large is more than 80% of the predicted value
+            # for i in range(len(uncertainty)):
+            #     if uncertainty[i] > 0.8 * predicted_parameter_array[i]:
+            #         uncertainty[i] = 0.0
+            
 
             # Optional debugging
             #condition_number = np.linalg.cond(regularized_hessian)
@@ -1830,6 +2404,10 @@ class CrowPeas:
             #condition_number = np.linalg.cond(normalized_hessian)
             #print(f"Condition Number of Normalized Hessian (Prediction {idx}):", condition_number)
             print("Uncertainties:", uncertainty)
+            #self.visualize_uncertainty_estimation2(pred, 'predicted_a', 'predicted_deltar')
+            #self.visualize_4d_objective_landscape(pred, idx)
+            self.visualize_uncertainty_of_A(pred, uncertainty, idx)
+            #self.visualize_marginal_distribution_of_A(pred, uncertainty, idx)
 
 
     def model_summary(self):
@@ -1964,12 +2542,15 @@ class CrowPeas:
 
         
     def print_seq_example(self):
-        example_index = 9
+        #example_index = 9
         # print raw synthetic data
-        mask_bool = self.synthetic_spectra.masks[example_index].astype(bool)
+        #mask_bool = self.synthetic_spectra.masks[example_index].astype(bool)
         #print(self.synthetic_spectra.spectra[0])
-        print(self.synthetic_spectra.spectra[0][mask_bool].shape)
-        print(self.synthetic_spectra.parameters[0][mask_bool].shape)
+        #print(self.synthetic_spectra.spectra[0][mask_bool].shape)
+        #print(self.synthetic_spectra.parameters[0][mask_bool].shape)
+
+        #vary_dict = {"degen": (5,12,"sinusoidal"), "deltar": (-0.02,0.00,"quadratic"), "sigma2": (0.003,0.01,"log"), "e0": (5,5,"sqrt")}
+        #const_dict = {"s02": 1}
 
         vary_dict = {"degen": (5,12,"sinusoidal"), "deltar": (-0.02,0.00,"quadratic"), "sigma2": (0.003,0.01,"log"), "e0": (5,5,"sqrt")}
         const_dict = {"s02": 1}
@@ -1978,14 +2559,26 @@ class CrowPeas:
         # sequence_length=20,
         # parameter_profiles=vary_dict,
         # fixed_parameters=const_dict)
-        novo_seq, novo_params = self.synthetic_spectra.generate_glitched_sequence(feff_path_file=self.feff_path_file,
+        self.synthetic_spectraS = SyntheticSpectrumS(
+            feff_path_file=self.feff_path_file,
+            param_ranges=self.param_ranges,
+            training_mode=self.training_mode,
+            num_examples=self.num_examples,
+            k_weight=self.k_weight,
+            k_range=self.k_range,
+            spectrum_noise=self.spectrum_noise,
+            noise_range=self.noise_range,
+            seed=self.seed,
+            generate=False,
+        )
+        novo_seq, novo_params = self.synthetic_spectraS.generate_glitched_sequence(feff_path_file=self.feff_path_file,
         sequence_length=20,
         parameter_profiles=vary_dict,
         fixed_parameters=const_dict,
         n_glitches=0)
 
-        print(novo_seq.shape)
-        print(novo_params.shape)
+        #print(novo_seq.shape)
+        #print(novo_params.shape)
 
         #plot_x_data = self.synthetic_spectra.spectra[example_index][mask_bool]
         #plt_y_data = self.synthetic_spectra.parameters[example_index][mask_bool]
@@ -1998,7 +2591,7 @@ class CrowPeas:
         plt_y_data_param_2 = plt_y_data[:, 2]
         plt_y_data_param_3 = plt_y_data[:, 3]
 
-        print(plt_y_data_param_0)
+        #print(plt_y_data_param_0)
 
         # get predictions
         normalized_x_data, _ = normalize_spectra(plot_x_data, self.norm_params_spectra)
@@ -2015,7 +2608,7 @@ class CrowPeas:
 
         print(plt_y_data_param_0_pred)
 
-        fig = plt.figure(figsize=(15, 5))
+        fig = plt.figure(figsize=(9, 3))
         gs = gridspec.GridSpec(1, 8)
 
         # Create colorblind-friendly gradient
@@ -2041,9 +2634,9 @@ class CrowPeas:
         ax1.plot(plt_y_data_param_0_pred, '--', color='black', label='Predicted', linewidth=2)
         ax1.set_ylim([4.9, 12.1])
         ax1.set_title("$A$")
-        ax1.set_xlabel("Spectra Index")
-        ax1.set_ylabel("Value")
-        ax1.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
+        #ax1.set_xlabel("Spectra Index")
+        #ax1.set_ylabel("Value")
+        #ax1.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax2 = plt.subplot(gs[0, 5])
         for idx in range(n_spectra):
@@ -2051,9 +2644,11 @@ class CrowPeas:
         ax2.plot(plt_y_data_param_1_pred, '--', color='black', label='Predicted', linewidth=2)
         ax2.set_ylim([-0.025, 0.01])
         ax2.set_title("$\Delta R$")
-        ax2.set_xlabel("Spectra Index")
-        ax2.set_ylabel("Value")
-        ax2.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
+        # make values scientific notation
+        ax2.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+        #ax2.set_xlabel("Spectra Index")
+        #ax2.set_ylabel("Value")
+        #ax2.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax3 = plt.subplot(gs[0, 6])
         for idx in range(n_spectra):
@@ -2061,9 +2656,10 @@ class CrowPeas:
         ax3.plot(plt_y_data_param_2_pred, '--', color='black', label='Predicted', linewidth=2)
         ax3.set_ylim([0.0015, 0.011])
         ax3.set_title("$\sigma^2$")
-        ax3.set_xlabel("Spectra Index")
-        ax3.set_ylabel("Value")
-        ax3.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
+        ax3.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+        #ax3.set_xlabel("Spectra Index")
+        #ax3.set_ylabel("Value")
+        #ax3.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         ax4 = plt.subplot(gs[0, 7])
         for idx in range(n_spectra):
@@ -2071,12 +2667,12 @@ class CrowPeas:
         ax4.plot(plt_y_data_param_3_pred, '--', color='black', label='Predicted', linewidth=2)
         ax4.set_ylim([2.5, 7.5])
         ax4.set_title("$E_0$")
-        ax4.set_xlabel("Spectra Index")
-        ax4.set_ylabel("Value")
-        ax4.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
+        #ax4.set_xlabel("Spectra Index")
+        #ax4.set_ylabel("Value")
+        #ax4.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
 
         plt.tight_layout()
-        save_path = os.path.join(self.config_dir, self.output_dir) + "/training_example.png"
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/fig3_example.png"
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
 
@@ -2162,7 +2758,7 @@ class CrowPeas:
         plt.savefig(save_path)
         plt.close()
 
-    def analyze_noise_sensitivity_method2(self, sequence_length=20, n_trials=10, max_noise=0.2):
+    def analyze_noise_sensitivity_method2(self, sequence_length=20, n_trials=10, max_noise=100):
         """Analyze how prediction accuracy varies with noise level."""
         
         vary_dict = {"degen": (5,12,"sinusoidal"), 
@@ -2170,21 +2766,39 @@ class CrowPeas:
                     "sigma2": (0.003,0.01,"log"), 
                     "e0": (5,5,"sqrt")}
         const_dict = {"s02": 1}
-        plot_names = ["$N$", "$\Delta R$", "$\sigma^2$", "$E_0$"]
+        plot_names = ["$N$", "$\Delta R$", "$\sigma^2$", "$\Delta E_0$"]
         
-        noise_levels = np.linspace(0, max_noise, 10)  # 10 points from 0 to max_noise
+        noise_levels = np.linspace(0.1, max_noise, 30)  # 10 points from 0 to max_noise
         param_errors = {param: [] for param in vary_dict.keys()}
-        
+
+        self.synthetic_spectraS = SyntheticSpectrumS(
+            feff_path_file=self.feff_path_file,
+            param_ranges=self.param_ranges,
+            training_mode=self.training_mode,
+            num_examples=self.num_examples,
+            k_weight=self.k_weight,
+            k_range=self.k_range,
+            spectrum_noise=self.spectrum_noise,
+            noise_range=self.noise_range,
+            seed=self.seed,
+            generate=False,
+        )
+        # novo_seq, novo_params = self.synthetic_spectraS.generate_glitched_sequence(feff_path_file=self.feff_path_file,
+        # sequence_length=20,
+        # parameter_profiles=vary_dict,
+        # fixed_parameters=const_dict,
+        # n_glitches=0)
+
         for noise_level in noise_levels:
             trial_errors = {param: [] for param in vary_dict.keys()}
             
             for trial in range(n_trials):
-                novo_seq, novo_params = self.synthetic_spectra.generate_glitched_sequence(
+                novo_seq, novo_params = self.synthetic_spectraS.generate_glitched_sequence(
                     feff_path_file=self.feff_path_file,
                     sequence_length=sequence_length,
                     parameter_profiles=vary_dict,
                     fixed_parameters=const_dict,
-                    n_glitches=10,  # No glitches, using noise instead
+                    n_glitches=0,  # No glitches, using noise instead
                     noise_level=noise_level
                 )
                 
@@ -2198,23 +2812,23 @@ class CrowPeas:
                     predictions = predictions.cpu().numpy()
                     predictions = denormalize_data(predictions, self.norm_params_parameters)
                 
-                # Debug prints
-                if noise_level == 0 and trial == 0:
-                    print("\nZero noise validation (normalized values):")
-                    for i, param in enumerate(vary_dict.keys()):
-                        print(f"\n{param}:")
-                        print(f"True values: {denormalized_params[:3, i]}")
-                        print(f"Predictions: {predictions[:3, i]}")
-                        errors = []
-                        for j in range(len(denormalized_params)):
-                            true_val = denormalized_params[j, i]
-                            pred_val = predictions[j, i]
-                            if abs(true_val) > 1e-10:
-                                error = abs((true_val - pred_val) / true_val) * 100
-                                errors.append(error)
-                        avg_error = np.mean(errors) if errors else 0
-                        print(f"errors: {errors}")
-                        print(f"Average error: {avg_error}")
+                # # Debug prints
+                # if noise_level == 0 and trial == 0:
+                #     print("\nZero noise validation (normalized values):")
+                #     for i, param in enumerate(vary_dict.keys()):
+                #         print(f"\n{param}:")
+                #         print(f"True values: {denormalized_params[:3, i]}")
+                #         print(f"Predictions: {predictions[:3, i]}")
+                #         errors = []
+                #         for j in range(len(denormalized_params)):
+                #             true_val = denormalized_params[j, i]
+                #             pred_val = predictions[j, i]
+                #             if abs(true_val) > 1e-10:
+                #                 error = abs((true_val - pred_val) / true_val) * 100
+                #                 errors.append(error)
+                #         avg_error = np.mean(errors) if errors else 0
+                #         print(f"errors: {errors}")
+                #         print(f"Average error: {avg_error}")
                 
                 # Calculate errors using normalized values
                 for i, param in enumerate(vary_dict.keys()):
@@ -2236,24 +2850,24 @@ class CrowPeas:
                 param_errors[param].append(np.mean(trial_errors[param]))
         
         # Plot results
-        plt.figure(figsize=(8, 4.5))
+        plt.figure(figsize=(3, 3))
         for idx, param in enumerate(vary_dict.keys()):
 
-            plt.plot(noise_levels, param_errors[param], marker='o', label=plot_names[idx])
+            plt.plot(noise_levels, param_errors[param], marker='o', markersize=3, label=plot_names[idx])
         
-        plt.xlabel('Noise Level')
+        plt.xlabel('SNR (dB)')
         plt.ylabel('% Error')
-        plt.title('Parameter-wise Prediction Error vs Noise Level')
+        plt.title('Prediction Error vs SNR')
         plt.legend()
         plt.grid(True)
-        plt.ylim(0, 20)
+        plt.ylim(0, 40)
         
-        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_sensitivity_glitch.png"
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_sensitivity_SNR.png"
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
         plt.close()
 
-    def visualize_noise_levels(self, max_noise=0.2, n_levels=3):
+    def visualize_noise_levels(self, max_noise=100, n_levels=3):
         """Visualize how different noise levels affect a single spectrum."""
         
         # Use same parameter settings as analyze_noise_sensitivity
@@ -2264,19 +2878,32 @@ class CrowPeas:
         const_dict = {"s02": 1}
         
         # Generate noise levels
-        noise_levels = np.linspace(0, max_noise, n_levels)
-        
+        noise_levels = np.linspace(0.1, max_noise, n_levels)
+
+        self.synthetic_spectraS = SyntheticSpectrumS(
+            feff_path_file=self.feff_path_file,
+            param_ranges=self.param_ranges,
+            training_mode=self.training_mode,
+            num_examples=self.num_examples,
+            k_weight=self.k_weight,
+            k_range=self.k_range,
+            spectrum_noise=self.spectrum_noise,
+            noise_range=self.noise_range,
+            seed=self.seed,
+            generate=False,
+        )
+
         # Create subplots
         fig, axes = plt.subplots(n_levels, 1, figsize=(8, 1.5*n_levels))
         fig.suptitle('Effect of Noise Levels on Spectrum')
         
         # Generate base spectrum (no noise)
-        base_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
+        base_seq, _ = self.synthetic_spectraS.generate_glitched_sequence(
             feff_path_file=self.feff_path_file,
             sequence_length=1,  # Just one spectrum
             parameter_profiles=vary_dict,
             fixed_parameters=const_dict,
-            n_glitches=3,
+            n_glitches=0,
             glitch_height=(.5,3),
             noise_level=0
         )
@@ -2286,12 +2913,12 @@ class CrowPeas:
         
         # Plot spectra with different noise levels
         for idx, noise_level in enumerate(noise_levels):
-            noisy_seq, _ = self.synthetic_spectra.generate_glitched_sequence(
+            noisy_seq, _ = self.synthetic_spectraS.generate_glitched_sequence(
                 feff_path_file=self.feff_path_file,
                 sequence_length=1,
                 parameter_profiles=vary_dict,
                 fixed_parameters=const_dict,
-                n_glitches=3,
+                n_glitches=0,
                 glitch_height=(.5,3),
                 noise_level=noise_level
             )
@@ -2306,7 +2933,7 @@ class CrowPeas:
             axes[idx].grid(True)
         
         plt.tight_layout()
-        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_visualization_glitch.png"
+        save_path = os.path.join(self.config_dir, self.output_dir) + "/noise_visualization_SNR.png"
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.savefig(save_path.replace(".png", ".svg"), dpi=300, bbox_inches='tight')
         plt.close()
@@ -2394,6 +3021,131 @@ class CrowPeas:
             print("Uncertainties:", self.mlp_pred_laplace)
 
 
+
+
+    def visualize_uncertainty_estimation(self, n_samples=50):
+        """
+        Visualize uncertainty estimation with two subplots:
+        1. Multiple curves showing variation within uncertainty bounds
+        2. Parameter sensitivity visualization
+        """
+        predictions = self.run_predictions()
+        self.get_MLP_uncertainty()
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # For the first prediction
+        pred = predictions[0]
+        uncertainty = self.mlp_uncertainties[0]
+        params = np.array([
+            pred['predicted_a'],
+            pred['predicted_deltar'],
+            pred['predicted_sigma2'],
+            pred['predicted_e0']
+        ])
+        
+        # Left plot: Multiple curves with uncertainty
+        q_range = pred['interpolated_chi_q']
+        base_curve = self.objective(q_range, *params)
+        ax1.plot(q_range, base_curve, 'k-', label='Predicted', linewidth=2)
+        
+        # Generate samples within uncertainty bounds
+        samples = multivariate_normal.rvs(
+            mean=params, 
+            cov=np.diag(uncertainty**2), 
+            size=n_samples
+        )
+        
+        for sample in samples:
+            curve = self.objective(q_range, *sample)
+            ax1.plot(q_range, curve, 'b-', alpha=0.1)
+        
+        ax1.set_xlabel('q')
+        ax1.set_ylabel('Intensity')
+        ax1.set_title('Parameter Uncertainty Effects')
+        
+        # Right plot: Parameter sensitivity
+        param_names = ['a', 'Δr', 'σ²', 'E₀']
+        ax2.errorbar(
+            range(len(params)),
+            params,
+            yerr=uncertainty,
+            fmt='o',
+            capsize=5,
+            capthick=2,
+            markersize=8
+        )
+        ax2.set_xticks(range(len(params)))
+        ax2.set_xticklabels(param_names)
+        ax2.set_title('Parameter Uncertainties')
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/uncertainty_estimation.png")
+        plt.close()
+
+# function for ploting Pd for the paper
+
+    def plot_results_Pd(self, sequence=False, title_size=14, label_size=14, tick_size=12, legend_size=6):
+        dataset_names = self.config["experiment"]["dataset_names"]
+        if not sequence:
+            predictions = self.run_predictions()
+        else:
+            predictions = self.run_predictions_S()
+        num_predictions = len(predictions)
+        kmin = self.k_range[0]
+        kmax = self.k_range[1]
+        
+        # Create grayscale colors for experimental data
+        exp_colors = ['black', 'blue', 'darkred']
+        predicted_colors = ['gray', 'lightblue', 'orange']
+        labels = ['Pd Foil', 'Pd NP / He 298 K', 'Pd NP / $H_2$ 298 K']
+        network_type = self.config["neural_network"]["architecture"]["type"]
+
+        # Create figure with 2 subplots
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 8))
+
+        for idx, (pred, exp_color, predicted_color, lab) in enumerate(zip(predictions, exp_colors, predicted_colors, labels)):
+            k_grid = np.array(self.config["neural_network"]["k_grid"], dtype=np.float32)
+            
+            interpolated_chi_q = pred['interpolated_chi_q']
+            interpolated_artemis = self.build_synth_spectra(pred['artemis_result'])
+            predicted_parameter_array = [pred['predicted_a'], pred['predicted_deltar'], 
+                                    pred['predicted_sigma2'], pred['predicted_e0']]
+            interpolated_nn = self.build_synth_spectra(predicted_parameter_array)
+            
+            mse_error_artemis = self.get_MSE_error(interpolated_artemis, interpolated_chi_q)
+            mse_error_nn = self.get_MSE_error(interpolated_nn, interpolated_chi_q)
+
+            # Experimental data (black/gray)
+            ax1.plot(k_grid, interpolated_chi_q, color=exp_color, label=f'{lab}', linewidth=2.5)
+            ax2.plot(k_grid, interpolated_chi_q, color=exp_color, label=f'{lab}', linewidth=2.5)
+
+            # Artemis and NN predictions with distinct colors
+            ax1.plot(k_grid, interpolated_artemis,
+                    label=f'MSE={mse_error_artemis:.3f}', 
+                    color=predicted_color, linestyle='--', alpha=0.7, linewidth=1.5)
+            
+            ax2.plot(k_grid, interpolated_nn,
+                    label=f'MSE={mse_error_nn:.3f}', 
+                    color=predicted_color, linestyle='--', alpha=0.7, linewidth=1.5)
+
+        for ax in [ax1, ax2]:
+            ax.set_xlim(kmin, kmax)
+            ax.legend(fontsize=legend_size, loc='best', ncol=1)
+            ax.set_xlabel('k (Å$^{-1}$)', fontsize=label_size)
+            ax.set_ylabel(r'$Re[\chi(q)] \ (\mathrm{\AA}^{-2})$', fontsize=label_size)
+            ax.tick_params(axis='both', which='major', labelsize=tick_size)
+            
+
+        ax1.set_title('Artemis Results', fontsize=title_size, pad=10)
+        ax2.set_title('Neural Network Results', fontsize=title_size, pad=10)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + '/qspace_pd.png', dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(self.config_dir, self.output_dir) + '/qspace_pd.svg', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
 class HistoryLogger(pl.Callback):
     def __init__(self, history):
         super().__init__()
@@ -2408,29 +3160,52 @@ class HistoryLogger(pl.Callback):
     def plot_chi(self, dataset_dir):
         data = read_ascii(dataset_dir)
 
-        k_weight = 2
+        k_weight = self.k_weight
 
-        if k_weight == 2:
+        if k_weight == 0:
+            data.chi0 = data.chi
+            plt_t.plot(data.k, data.chi0, label='Chi0')
+
+        elif k_weight == 1:
+            data.chi1 = data.chi * data.k
+            plt_t.plot(data.k, data.chi1, label='Chi1')
+
+
+        elif k_weight == 2:
             data.chi2 = data.chi * data.k ** 2
+            plt_t.plot(data.k, data.chi2, label='Chi2')
 
-        plt_t.plot(data.k, data.chi2, label='Chi2')
+        else:
+            raise ValueError("Invalid k-weight")
+
         plt_t.xlabel('k')
         plt_t.xfrequency(20)
-        plt_t.ylabel('Chi2')
+        plt_t.ylabel('Chi')
         plt_t.title(f'{dataset_dir}')
         plt_t.show()
     
     def plot_r(self, dataset_dir):
         data = read_ascii(dataset_dir)
 
-        k_weight = 2
-        kmin = 2
-        kmax = 14
+        k_weight = self.k_weight
+        kmin = self.kmin
+        kmax = self.kmax
 
         plt_t.clear_figure()
 
-        if k_weight == 2:
-            data.chi2 = data.chi * data.k ** 2
+        if k_weight == 0:
+            data.chi = data.chi
+
+        elif k_weight == 1:
+            data.chi = data.chi * data.k
+
+
+        elif k_weight == 2:
+            data.chi = data.chi * data.k ** 2
+
+        else:
+            raise ValueError("Invalid k-weight")
+
         xftf(data, kweight=k_weight, kmin=kmin, kmax=kmax)
 
         plt_t.plot(data.r, data.chir_mag, label='FT-EXAFS')
@@ -2441,11 +3216,11 @@ class HistoryLogger(pl.Callback):
         plt_t.show()
 
 
-def main():
+#def main():
 
-    path = "/home/nick/Projects/crowpeas/tests/full_run/training10k_qspace.toml"
-    print(path)
-    crowpeas = CrowPeas()
+    #path = "/home/nick/Projects/crowpeas/tests/Pd_figure/training10k_qspace.toml"
+    #print(path)
+    #crowpeas = CrowPeas()
 
     # (        # train loop
     #     crowpeas.load_config(path)
@@ -2472,18 +3247,37 @@ def main():
     # crowpeas.plot_parity()
     # crowpeas.plot_results()
 
-    (        # testing loop laplace
-        crowpeas.load_config(path)
-        .load_and_validate_config()
-        .load_synthetic_spectra()
-        .prepare_dataloader()
-        .load_model()
-        .get_MLP_predictions_laplace()
+    # (        # testing loop laplace
+    #     crowpeas.load_config(path)
+    #     .load_and_validate_config()
+    #     .load_synthetic_spectra()
+    #     .prepare_dataloader()
+    #     .load_model()
+    #     .get_MLP_predictions_laplace()
 
-    )
+    # )
+
+    # (        # testing loop unc fig
+    #     crowpeas.load_config(path)
+    #     .load_and_validate_config()
+    #     .load_synthetic_spectra()
+    #     .prepare_dataloader()
+    #     .load_model()
+    #     .get_MLP_uncertainty()
+
+    # ) 
+
+    # (        # SNR
+    #     crowpeas.load_config(path)
+    #     .load_and_validate_config()
+    #     .load_synthetic_spectra()
+    #     .prepare_dataloader()
+    #     .load_model()
+        
+    # )    
     #crowpeas.plot_parity()
     #crowpeas.plot_results()
-
+    #crowpeas.plot_results_Pd()
     #crowpeas.print_training_example()
     #crowpeas.print_seq_example()
     #crowpeas.analyze_noise_sensitivity_method2()
@@ -2495,5 +3289,5 @@ def main():
     #crowpeas.plot_training_history()
 
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    main()

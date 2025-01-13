@@ -432,10 +432,18 @@ class SyntheticSpectrumS:
             
         return glitched_spectrum
 
-    def _add_noise(self, spectrum, noise_level):
-        """Add Gaussian white noise to spectrum"""
-        max_amplitude = np.max(np.abs(spectrum))
-        noise = np.random.normal(0, noise_level * max_amplitude, len(spectrum))
+    # def _add_noise(self, spectrum, noise_level):
+    #     """Add Gaussian white noise to spectrum"""
+    #     max_amplitude = np.max(np.abs(spectrum))
+    #     noise = np.random.normal(0, noise_level * max_amplitude, len(spectrum))
+    #     return spectrum + noise
+    def _add_noise(self, spectrum, snr):
+        # RMS of the signal
+        signal_rms = np.sqrt(np.mean(spectrum**2))
+        # Solve for noise std dev:
+        #   SNR = E[S^2]/E[N^2] = RMS(S)^2 / sigma^2
+        noise_std = signal_rms / np.sqrt(snr)
+        noise = np.random.normal(0, noise_std, len(spectrum))
         return spectrum + noise
 
     def generate_glitched_sequence(
