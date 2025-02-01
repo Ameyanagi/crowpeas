@@ -119,3 +119,14 @@ example_exp/training_data/
 example_exp/checkpoint/
 
 *.feather
+*.csv
+*.pkl
+*.pt
+*.pth
+*.log
+*.txt
+*.json
+*.yaml
+*.svg
+*.png
+*.ckpt
