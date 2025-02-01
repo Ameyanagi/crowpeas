@@ -1148,11 +1148,11 @@ class CrowPeas:
 
         return self
 
-    def plot_parity(self, save_path="/parity.png"):
+    def plot_parity(self, save_path="/parity.png"): 
 
         save_path = os.path.join(self.config_dir, self.output_dir) + save_path 
 
-        parameter_name_dict = {0: "A", 1: "deltar", 2: "sigma2", 3: "e0"}
+        parameter_name_dict = {0: "A", 1: "$\Delta R (Å)$", 2: "$\sigma^2 (Å^{2})$", 3: "$E_0$ (eV)"}
 
         if not hasattr(self, "denormalized_y_test") or not hasattr(
             self, "denormalized_test_pred"
@@ -1162,7 +1162,8 @@ class CrowPeas:
         num_parameters = self.denormalized_y_test.shape[1]
 
         # Plot predicted vs. true values for each parameter in a single row
-        fig, axs = plt.subplots(1, num_parameters, figsize=(5 * num_parameters, 5))
+        fig, axs = plt.subplots(2, 2, figsize=(5, 5))
+        axs = axs.flatten()
 
         for i in range(num_parameters):
             axs[i].scatter(
@@ -1181,9 +1182,13 @@ class CrowPeas:
                 ],
                 "r--",
             )
-            axs[i].set_xlabel("True Values")
-            axs[i].set_ylabel("Predicted Values")
-            axs[i].set_title(f"Parameter {parameter_name_dict[i]}: Predicted vs. True")
+            axs[i].set_xlabel("True Values", fontsize=12)
+            axs[i].set_ylabel("Predicted Values", fontsize=12)
+            axs[i].set_title(f"{parameter_name_dict[i]}", fontsize=12)
+            # make font sizes 12
+            axs[i].tick_params(axis='both', which='major', labelsize=12)
+            axs[i].tick_params(axis='both', which='minor', labelsize=12)
+
 
         fig.tight_layout()
 
@@ -2982,7 +2987,7 @@ class CrowPeas:
         #vary_dict = {"degen": (5,12,"sinusoidal"), "deltar": (-0.02,0.00,"quadratic"), "sigma2": (0.003,0.01,"log"), "e0": (5,5,"sqrt")}
         #const_dict = {"s02": 1}
 
-        vary_dict = {"degen": (11,11,"sinusoidal"), "deltar": (-0.02,0.00,"linear"), "sigma2": (0.006,0.006,"log"), "e0": (5,5,"sinusoidal")}
+        vary_dict = {"degen": (11,11,"sinusoidal"), "deltar": (-0.02,0.00,"linear"), "sigma2": (0.006,0.006,"log"), "e0": (3,7,"sinusoidal")}
         const_dict = {"s02": 1}
 
         # novo_seq, novo_params = self.synthetic_spectra.generate_one_sequence(feff_path_file=self.feff_path_file,
@@ -3055,7 +3060,7 @@ class CrowPeas:
         ax0.set_xlim([0, 20])
         ax0.set_title("Input Spectra")
         ax0.set_xlabel("k (Å$^{-1}$)")
-        ax0.set_ylabel("$\chi(k)k^2$")
+        ax0.set_ylabel("$\chi(k)k^2$ (Å$^{-2}$)")
 
         # Parameter plots with matching colors
         ax1 = plt.subplot(gs[0, 4])
@@ -3073,7 +3078,7 @@ class CrowPeas:
             ax2.plot(idx, plt_y_data_param_1[idx], 'o', color=colors[idx], markersize=8)
         ax2.plot(plt_y_data_param_1_pred, '--', color='black', label='Predicted', linewidth=2)
         ax2.set_ylim([-0.025, 0.01])
-        ax2.set_title("$\Delta R$")
+        ax2.set_title("$\Delta R (Å)$")
         # make values scientific notation
         ax2.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
         #ax2.set_xlabel("Spectra Index")
@@ -3085,7 +3090,7 @@ class CrowPeas:
             ax3.plot(idx, plt_y_data_param_2[idx], 'o', color=colors[idx], markersize=8)
         ax3.plot(plt_y_data_param_2_pred, '--', color='black', label='Predicted', linewidth=2)
         ax3.set_ylim([0.0015, 0.011])
-        ax3.set_title("$\sigma^2$")
+        ax3.set_title("$\sigma^2 (Å^{2})$")
         ax3.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
         #ax3.set_xlabel("Spectra Index")
         #ax3.set_ylabel("Value")
@@ -3096,7 +3101,7 @@ class CrowPeas:
             ax4.plot(idx, plt_y_data_param_3[idx], 'o', color=colors[idx], markersize=8)
         ax4.plot(plt_y_data_param_3_pred, '--', color='black', label='Predicted', linewidth=2)
         ax4.set_ylim([2.5, 7.5])
-        ax4.set_title("$\Delta E_0$")
+        ax4.set_title("$\Delta E_0 (eV)$")
         #ax4.set_xlabel("Spectra Index")
         #ax4.set_ylabel("Value")
         #ax4.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
@@ -3487,6 +3492,9 @@ class CrowPeas:
         plt.plot(best_data['epoch'], best_data['val/loss_best'], 
                 label="Best Validation Loss", marker='o', linestyle='--', color="#009E73", markersize=1)
         
+        # set all font sizes to 12
+        plt.rcParams.update({'font.size': 12})
+
         plt.yscale('log')
         plt.xlabel("Epoch")
         plt.ylabel("Log(Loss)")
@@ -3494,7 +3502,7 @@ class CrowPeas:
         plt.grid(True, which="both", linestyle="--", linewidth=0.5)
         plt.tight_layout()
         plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.png")
-        plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
+        #plt.savefig(os.path.join(self.config_dir, self.output_dir) + "/loss_curves.svg")
         plt.close()
 
 
@@ -3739,81 +3747,81 @@ class HistoryLogger(pl.Callback):
         plt_t.show()
 
 
-def main():
+# def main():
 
-    #path = "/home/nick/Projects/crowpeas/MLP_Pd/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
-    #path = "/home/nick/Projects/crowpeas/MLP_Pt/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
-    path = "/home/nick/Projects/crowpeas/MLP_Rh/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
-    print(path)
-    crowpeas = CrowPeas()
+#     #path = "/home/nick/Projects/crowpeas/MLP_Pd/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
+#     #path = "/home/nick/Projects/crowpeas/MLP_Pt/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
+#     path = "/home/nick/Projects/crowpeas/MLP_Rh/output_2L_decay_0_qminqmaxNone_t2_n01/training10k_qspace.toml"
+#     print(path)
+#     crowpeas = CrowPeas()
 
-    # (        # train loop
-    #     crowpeas.load_config(path)
-    #     .load_and_validate_config()
-    #     .init_synthetic_spectra()
-    #     .save_training_data()
-    #     .prepare_dataloader()
-    #     .save_config()
-    #     .train()
-    #     .load_model()
-    #     .validate_model()
+#     # (        # train loop
+#     #     crowpeas.load_config(path)
+#     #     .load_and_validate_config()
+#     #     .init_synthetic_spectra()
+#     #     .save_training_data()
+#     #     .prepare_dataloader()
+#     #     .save_config()
+#     #     .train()
+#     #     .load_model()
+#     #     .validate_model()
 
-    # )
-    #crowpeas.plot_training_history()
+#     # )
+#     #crowpeas.plot_training_history()
 
-    # (        # testing loop
-    #     crowpeas.load_config(path)
-    #     .load_and_validate_config()
-    #     .load_synthetic_spectra()
-    #     .prepare_dataloader()
-    #     .load_model()
+#     # (        # testing loop
+#     #     crowpeas.load_config(path)
+#     #     .load_and_validate_config()
+#     #     .load_synthetic_spectra()
+#     #     .prepare_dataloader()
+#     #     .load_model()
 
-    # )
-    # crowpeas.plot_parity()
-    # crowpeas.plot_results()
+#     # )
+#     # crowpeas.plot_parity()
+#     # crowpeas.plot_results()
 
-    # (        # testing loop laplace
-    #     crowpeas.load_config(path)
-    #     .load_and_validate_config()
-    #     .load_synthetic_spectra()
-    #     .prepare_dataloader()
-    #     .load_model()
-    #     .get_MLP_predictions_laplace()
+#     # (        # testing loop laplace
+#     #     crowpeas.load_config(path)
+#     #     .load_and_validate_config()
+#     #     .load_synthetic_spectra()
+#     #     .prepare_dataloader()
+#     #     .load_model()
+#     #     .get_MLP_predictions_laplace()
 
-    # )
+#     # )
 
-    # (        # testing loop unc fig
-    #     crowpeas.load_config(path)
-    #     .load_and_validate_config()
-    #     .load_synthetic_spectra()
-    #     .prepare_dataloader()
-    #     .load_model()
-    #     #.get_MLP_uncertainty()
+#     # (        # testing loop unc fig
+#     #     crowpeas.load_config(path)
+#     #     .load_and_validate_config()
+#     #     .load_synthetic_spectra()
+#     #     .prepare_dataloader()
+#     #     .load_model()
+#     #     #.get_MLP_uncertainty()
 
-    # ) 
+#     # ) 
 
-    (        # SNR
-        crowpeas.load_config(path)
-        .load_and_validate_config()
-        .load_synthetic_spectra()
-        .prepare_dataloader()
-        .load_model() 
+#     (        # SNR
+#         crowpeas.load_config(path)
+#         .load_and_validate_config()
+#         .load_synthetic_spectra()
+#         .prepare_dataloader()
+#         .load_model() 
         
-    )    
-    #crowpeas.plot_parity()
-    #crowpeas.plot_results()
-    #crowpeas.plot_results_Pd()
-    #crowpeas.print_training_example()
-    #crowpeas.print_seq_example()
-    #crowpeas.analyze_noise_sensitivity_method2()
-    crowpeas.analyze_glitch_sensitivity()
-    #crowpeas.visualize_noise_levels()
-    #crowpeas.plot_loss_curves("/home/nick/Projects/crowpeas/MLP_Ag/lightning_logs/version_2/metrics.csv")
-    #crowpeas.visualize_noise_impact()
-    #crowpeas.plot_parity()
-    #crowpeas.plot_parity2()
-    #crowpeas.plot_training_history()
+#     )    
+#     #crowpeas.plot_parity()
+#     #crowpeas.plot_results()
+#     #crowpeas.plot_results_Pd()
+#     #crowpeas.print_training_example()
+#     #crowpeas.print_seq_example()
+#     #crowpeas.analyze_noise_sensitivity_method2()
+#     #crowpeas.analyze_glitch_sensitivity()
+#     #crowpeas.visualize_noise_levels()
+#     crowpeas.plot_loss_curves("/home/nick/Projects/crowpeas/MLP_Rh/lightning_logs/version_5/metrics.csv")
+#     #crowpeas.visualize_noise_impact()
+#     #crowpeas.plot_parity()
+#     #crowpeas.plot_parity2()
+#     #crowpeas.plot_training_history()
 
 
-if __name__ == "__main__":
-   main()
+# if __name__ == "__main__":
+#    main()
