@@ -7,7 +7,10 @@ crowpeas
    :align: center
 
 .. image:: https://img.shields.io/pypi/v/crowpeas.svg
-        :target: https://pypi.python.org/pypi/crowpeas
+    :target: https://pypi.python.org/pypi/crowpeas
+    :scale: 50%
+    :rotate: 90
+
 
 .. image:: https://img.shields.io/travis/Ameyanagi/crowpeas.svg
         :target: https://travis-ci.com/Ameyanagi/crowpeas
