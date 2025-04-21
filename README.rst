@@ -6,10 +6,10 @@ crowpeas
    :alt: crowpeas logo
    :align: center
 
-.. image:: https://img.shields.io/pypi/v/crowpeas.svg
-    :target: https://pypi.python.org/pypi/crowpeas
-    :scale: 50%
-    :rotate: 90
+<a href="https://pypi.python.org/pypi/crowpeas">
+  <img src="https://img.shields.io/pypi/v/crowpeas.svg" width="100">
+</a>
+
 
 
 .. image:: https://img.shields.io/travis/Ameyanagi/crowpeas.svg
