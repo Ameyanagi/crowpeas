@@ -1,10 +1,10 @@
 [general]
 title = "Pd training qspace"
 mode = "training"
-output_dir = "../output/output_x"
+output_dir = "output"
 
 [training]
-feffpath = "../feff/Pdfeff0001.dat"
+feffpath = "Pdfeff0001.dat"
 training_set_dir = "training_set_2"
 training_data_prefix = "Pd training_training_data"
 num_examples = 10
@@ -29,7 +29,7 @@ k_grid = [ "0.0", "0.05", "0.1", "0.15000000000000002", "0.2", "0.25", "0.300000
 
 [experiment]
 dataset_names = [ "foil", "He", "H2",]
-dataset_dir = [ "../exp_data/Pdfoil-Feb08-X18B.chik", "../exp_data/Pd_SHP_01F_He_RT_R.chik", "../exp_data/Pd_SHP_01F_H2-293K.chik",]
+dataset_dir = [ "exp_data/Pd_SHP_01F_H2-293K.chik", "exp_data/Pd_SHP_01F_He_RT_R.chik", "exp_data/Pdfoil-Feb08-X18B.chik",]
 k_range = [ 2, 14,]
 r_range = [ 1.7, 3.0,]
 k_weight = 2
@@ -37,6 +37,8 @@ k_weight = 2
 [artemis]
 result = [ [ 10.3, -0.0099, 0.0057, -0.5,], [ 7.6, -0.008, 0.0073, -1.5,], [ 7.8, 0.063, 0.0078, -1.3,],]
 unc = [ [ 0.2, 0.0009, 0.0001, 0.2,], [ 0.4, 0.002, 0.0003, 0.3,], [ 0.3, 0.002, 0.0002, 0.3,],]
+
+[general.norm_params_spectra]
 
 [training.param_ranges]
 s02 = [ 0.75, 1.2,]

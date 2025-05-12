@@ -5,46 +5,82 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "crowpeas"
 version = "0.1.0"
-description = "EXAFS fitting using Neural Network"
+description = "EXAFS fitting using Neural Networks"
 readme = "README.rst"
 authors = [{ name = "Ameyanagi", email = "contact@ameyanagi.com" }]
 maintainers = [{ name = "Ameyanagi", email = "contact@ameyanagi.com" }]
-classifiers = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 license = { text = "MIT license" }
+requires-python = ">=3.9"
 dependencies = [
-    "typer",
-    "lightning",
-    "matplotlib",
-    "numpy",
-    "pandas",
-    "pytest",
-    "rich",
-    "toml",
-    "torch",
-    "torchbnn",
-    "torchmetrics",
-    "xraylarch",
+    "typer>=0.9.0",
+    "lightning>=2.0.0",
+    "matplotlib>=3.5.0",
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "rich>=10.0.0",
+    "toml>=0.10.2",
+    "torch>=2.0.0",
+    "torchbnn>=1.2",
+    "torchmetrics>=1.0.0",
+    "xraylarch>=2023.1.0",
+    "plotext>=5.0.0",
+    "scipy>=1.7.0",
+    "torchinfo>=1.7.0",
+    "numdifftools>=0.9.0",
+    "uncertainties>=3.1.0",
+    "torchdiffeq>=0.2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "coverage", # testing
-    "pyright",  # linting
-    "pytest",   # testing
-    "ruff",     # linting
+    "coverage>=7.0.0",    # testing
+    "pyright>=1.1.300",   # type checking
+    "pytest>=7.0.0",      # testing
+    "ruff>=0.0.200",      # linting
+    "tox>=4.0.0",         # testing on multiple Python versions
+    "build>=0.10.0",      # building package
 ]
 
 [project.scripts]
 crowpeas = "crowpeas.cli:app"
 
 [project.urls]
-
-bugs = "https://github.com/Ameyanagi/crowpeas/issues"
-changelog = "https://github.com/Ameyanagi/crowpeas/blob/master/changelog.md"
-homepage = "https://github.com/Ameyanagi/crowpeas"
+"Homepage" = "https://github.com/Ameyanagi/crowpeas"
+"Bug Tracker" = "https://github.com/Ameyanagi/crowpeas/issues"
+"Documentation" = "https://crowpeas.readthedocs.io/en/latest/"
+"Source Code" = "https://github.com/Ameyanagi/crowpeas"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.package-data]
-"*" = ["*.*"]
+"crowpeas" = ["*.toml", "*.dat"]
+
+# Configuration for development tools
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "B", "I"]
+ignore = []
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", "**/.venv"]
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

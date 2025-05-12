@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 def normalize_data(
-    data: np.ndarray, 
+    data: np.ndarray,
     feature_range: tuple = (0, 1),
     parameters: dict = None
 ) -> tuple[np.ndarray, dict]:
@@ -41,6 +41,7 @@ def normalize_data(
     normalized_data = feature_min + (data - min_val) / (max_val - min_val) * scale
     return normalized_data, norm_params
 
+
 def normalize_spectra(
     spectra: np.ndarray,
     parameters: dict = None
@@ -68,14 +69,14 @@ def normalize_spectra(
     return normalized_spectra, norm_params
 
 
-
-def normalize_data_S(
-    data: np.ndarray, 
-    mask: np.ndarray, 
+def normalize_data_with_mask(
+    data: np.ndarray,
+    mask: np.ndarray,
     feature_range: tuple = (0, 1)
 ) -> tuple[np.ndarray, dict]:
     """
     Normalize the data to the specified feature range, excluding padded entries.
+    This is a specialized version for sequence data with masks.
 
     Args:
         data (np.ndarray): The data to be normalized. Shape: [num_examples, max_len, features]
@@ -100,14 +101,14 @@ def normalize_data_S(
     # Compute min and max per feature
     min_val = valid_data.min(axis=0)
     max_val = valid_data.max(axis=0)
-    
+
     # Avoid division by zero
     scale = max_val - min_val
     scale[scale == 0] = 1.0
 
     # Normalize valid data
     normalized_valid = feature_min + ((valid_data - min_val) / scale) * (feature_max - feature_min)
-    
+
     # Assign normalized values back
     reshaped_normalized = normalized_data.reshape(-1, num_features)
     reshaped_normalized[reshaped_mask] = normalized_valid
@@ -124,12 +125,14 @@ def normalize_data_S(
 
     return normalized_data, norm_params
 
-def normalize_spectra_S(
-    spectra: np.ndarray, 
+
+def normalize_spectra_with_mask(
+    spectra: np.ndarray,
     mask: np.ndarray
 ) -> tuple[np.ndarray, dict]:
     """
     Normalize the spectra, excluding padded entries.
+    This is a specialized version for sequence data with masks.
 
     Args:
         spectra (np.ndarray): The spectra data to be normalized. Shape: [num_examples, max_len, k_len]
@@ -171,6 +174,11 @@ def normalize_spectra_S(
     return normalized_spectra, norm_params
 
 
+# Aliases for backward compatibility
+normalize_data_S = normalize_data_with_mask
+normalize_spectra_S = normalize_spectra_with_mask
+
+
 
 def interpolate_spectrum(
     original_k: np.ndarray, original_spectrum: np.ndarray, target_k: np.ndarray
@@ -194,31 +202,60 @@ def denormalize_data(normalized_data: np.ndarray, norm_params: dict) -> np.ndarr
     Args:
         normalized_data (np.ndarray): The data to be denormalized.
         norm_params (dict): Dictionary containing the min and max values for each feature.
-        feature_range (tuple): The range of transformed data used during normalization.
 
     Returns:
         np.ndarray: Denormalized data.
     """
+    min_val = np.array(norm_params["min"]).astype(np.float32)
+    max_val = np.array(norm_params["max"]).astype(np.float32)
+    feature_min = np.array(norm_params["feature_min"]).astype(np.float32)
+    feature_max = np.array(norm_params["feature_max"]).astype(np.float32)
 
-    min_val = norm_params["min"]
-    min_val = np.array(min_val).astype(np.float32)
-    max_val = norm_params["max"]
-    max_val = np.array(max_val).astype(np.float32)
-    feature_min = norm_params["feature_min"]
-    feature_min = np.array(feature_min).astype(np.float32)
-    feaure_max = norm_params["feature_max"]
-    feaure_max = np.array(feaure_max).astype(np.float32)
-    scale = feaure_max - feature_min
-    denormalized_data = ((normalized_data - feature_min) / scale) * (
-        max_val - min_val
-    ) + min_val
+    scale = feature_max - feature_min
+    denormalized_data = ((normalized_data - feature_min) / scale) * (max_val - min_val) + min_val
 
     return denormalized_data
 
 
 def denormalize_spectra(normalized_data: np.ndarray, norm_params: dict) -> np.ndarray:
+    """Denormalize spectra by multiplying by the maximum absolute value.
+
+    Args:
+        normalized_data (np.ndarray): The normalized spectra.
+        norm_params (dict): Dictionary containing the max_abs_val.
+
+    Returns:
+        np.ndarray: Denormalized spectra.
+    """
     max_abs_val = norm_params["max_abs_val"]
     return normalized_data * max_abs_val
+
+
+def denormalize_std(std_normalized: np.ndarray, norm_params: dict) -> np.ndarray:
+    """Denormalize the standard deviation from the normalized scale to the original scale.
+
+    Args:
+        std_normalized (np.ndarray): The standard deviation in the normalized scale.
+        norm_params (dict): Dictionary containing the min and max values for each feature.
+
+    Returns:
+        np.ndarray: Denormalized standard deviation.
+    """
+    # Extract normalization parameters
+    min_val = np.array(norm_params["min"]).astype(np.float32)
+    max_val = np.array(norm_params["max"]).astype(np.float32)
+    feature_min = np.array(norm_params["feature_min"]).astype(np.float32)
+    feature_max = np.array(norm_params["feature_max"]).astype(np.float32)
+
+    # Compute scaling factor 'a'
+    data_range = max_val - min_val
+    feature_range = feature_max - feature_min
+    a = feature_range / data_range
+
+    # Denormalize the standard deviation
+    std_original = std_normalized / a
+
+    return std_original
 
 
 def predict_and_denormalize(
@@ -226,25 +263,22 @@ def predict_and_denormalize(
     spectrum: np.ndarray,
     norm_params: dict,
     device: str | None = None,
-):
+) -> np.ndarray:
     """Predict and denormalize the output for a single unknown spectrum.
 
     Args:
         model (torch.nn.Module): The trained model.
-        spectrum (np.ndarray): The unknown spectrum of shape (100,).
-        norm_params (dict): Dictionary containing the min and max values for normalization.
-        device (str): The device to run the model on ('cuda', 'mps', or 'cpu').
-
+        spectrum (np.ndarray): The unknown spectrum.
+        norm_params (dict): Dictionary containing normalization parameters.
+        device (str, optional): The device to run the model on. If None, uses model's device.
 
     Returns:
         np.ndarray: Denormalized prediction.
     """
+    device = model.device if device is None else device
 
-    device = model.device
     # Convert the spectrum to a tensor and add batch dimension
-    spectrum_tensor = (
-        torch.tensor(spectrum, dtype=torch.float32).unsqueeze(0).to(device)
-    )
+    spectrum_tensor = torch.tensor(spectrum, dtype=torch.float32).unsqueeze(0).to(device)
 
     # Put the model in evaluation mode
     model.eval()
@@ -259,8 +293,28 @@ def predict_and_denormalize(
     return denormalize_data(prediction, norm_params)
 
 
-def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict, n_samples: int=10):
+def predict_with_uncertainty(
+    model: torch.nn.Module,
+    input_data: torch.Tensor | np.ndarray,
+    norm_params: dict,
+    n_samples: int = 10
+) -> tuple[np.ndarray, np.ndarray]:
+    """Predict with uncertainty using Monte Carlo sampling.
+
+    Args:
+        model (torch.nn.Module): The trained model.
+        input_data (torch.Tensor | np.ndarray): Input data for prediction.
+        norm_params (dict): Dictionary containing normalization parameters.
+        n_samples (int, optional): Number of forward passes for uncertainty estimation.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Mean predictions and uncertainty estimates.
+    """
     device = model.device
+
+    # Ensure input_data is a tensor and on the correct device
+    if not isinstance(input_data, torch.Tensor):
+        input_data = torch.tensor(input_data, dtype=torch.float32)
     input_data = input_data.to(device)
 
     # Perform multiple forward passes
@@ -280,56 +334,8 @@ def predict_with_uncertainty(model: torch.nn.Module, input_data: np.ndarray, nor
 
     return mean_predictions, uncertainty
 
-def denormalize_std(std_normalized: np.ndarray, norm_params: dict) -> np.ndarray:
-    """Denormalize the standard deviation from the normalized scale to the original scale.
 
-    Args:
-        std_normalized (np.ndarray): The standard deviation in the normalized scale.
-        norm_params (dict): Dictionary containing the min and max values for each feature.
-
-    Returns:
-        np.ndarray: Denormalized standard deviation.
-    """
-    # Extract normalization parameters
-    min_val = np.array(norm_params["min"]).astype(np.float32)
-    max_val = np.array(norm_params["max"]).astype(np.float32)
-    feature_min = np.array(norm_params["feature_min"]).astype(np.float32)
-    feature_max = np.array(norm_params["feature_max"]).astype(np.float32)
-    
-    # Compute scaling factor 'a'
-    data_range = max_val - min_val
-    feature_range = feature_max - feature_min
-    a = feature_range / data_range
-    
-    # Denormalize the standard deviation
-    std_original = std_normalized / a
-    
-    return std_original
-
-
-def predict_with_uncertainty_hetMLP(model: torch.nn.Module, input_data: np.ndarray, norm_params: dict):
-    device = next(model.parameters()).device
-    model.eval()
-    
-    # Ensure input_data is a tensor and move to the appropriate device
-    if not isinstance(input_data, torch.Tensor):
-        input_data = torch.tensor(input_data, dtype=torch.float32)
-    input_data = input_data.to(device)
-    
-    with torch.no_grad():
-        # Get mean and log variance from the model
-        mean, log_var = model(input_data)
-        std = torch.exp(0.5 * log_var)  # Convert log variance to standard deviation
-
-        # Move tensors to CPU and convert to numpy arrays
-        mean = mean.cpu().numpy()
-        std = std.cpu().numpy()
-
-        # Denormalize mean and standard deviation
-        mean_predictions = denormalize_data(mean, norm_params)
-        std_predictions = denormalize_std(std, norm_params)
-
-    return mean_predictions, std_predictions
+# Function removed as Het-MLP is no longer supported
 
 # TODO: refactor
 def plot_MSE_error_in_krange(

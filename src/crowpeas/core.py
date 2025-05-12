@@ -1,8 +1,5 @@
 """Main module."""
 
-from functools import reduce
-from numpy.linalg import cond, norm
-from scipy.ndimage import label
 import toml
 import os
 import math
@@ -10,28 +7,20 @@ from typing import Sequence, Literal
 import json
 import pandas as pd
 import numdifftools as nd
-from uncertainties import covariance_matrix
 from lightning.pytorch.callbacks import EarlyStopping
 
 from .data_generator import SyntheticSpectrum
 from .data_generatorS import SyntheticSpectrumS
 from .data_loader import CrowPeasDataModule
-from .data_loader_NODE import CrowPeasDataModuleNODE
 import lightning as pl
-from .model.BNN import BNN
 from .model.MLP import MLP
-from .model.CNN import CNN
-from .model.NODE import NODE
-from .model.HetMLPNM import hetMLP
+from .model.CNN import CNN  # CNN model is in testing
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
 from torchinfo import torchinfo
-#from laplace import Laplace
-from scipy.stats import f, multivariate_normal
+from scipy.stats import multivariate_normal
 import itertools
-from scipy.integrate import nquad
-import uncertainties
 
 from .utils import (
     normalize_data,
@@ -40,125 +29,133 @@ from .utils import (
     denormalize_spectra,
     interpolate_spectrum,
     predict_with_uncertainty,
-    predict_with_uncertainty_hetMLP,
     normalize_data_S,
     normalize_spectra_S
 )
 from larch.xafs import xftf, xftr, feffpath, path2chi, ftwindow, estimate_noise
 from larch.io import read_ascii
-from larch.fitting import param, guess, param_group
-from larch import Group 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.cm as cm
 
 import plotext as plt_t
 
-from scipy.linalg import inv
-
-from .utils import create_random_series
-
-# from laplace import Laplace, marglik_training
-# from copy import deepcopy
-
 
 class CrowPeas:
-    # general parameters
+    """
+    Main class for EXAFS fitting using Neural Networks.
+
+    This class provides functionality for generating synthetic spectra,
+    training neural network models, and making predictions on experimental data.
+    """
+
+    # General parameters
     title: str = ""
-    config_filename: str
-    config_dir: str
-    config: dict
-    exp_config_filename: str
-    exp_config_dir: str
-    exp_config: dict
-    norm_params_spectra: dict
-    norm_params_parameters: dict
-    output_dir: str
+    config_filename: str  # Path to the configuration file
+    config_dir: str       # Directory containing the configuration file
+    config: dict          # Loaded configuration data
+    exp_config_filename: str  # Path to experimental configuration file
+    exp_config_dir: str       # Directory containing the experimental configuration
+    exp_config: dict          # Loaded experimental configuration
+    norm_params_spectra: dict  # Normalization parameters for spectra
+    norm_params_parameters: dict  # Normalization parameters for parameters
+    output_dir: str           # Directory for output files
 
-    k: np.ndarray
+    k: np.ndarray  # K-space grid
 
-    # parameters related to general neural network
-    neural_network: dict
-    model_name: str
-    model_dir: str
-    checkpoint_dir: str
-    checkpoint_name: str
-    model: pl.LightningModule
+    # Neural network configuration
+    neural_network: dict  # Neural network configuration from config file
+    model_name: str       # Name of the model
+    model_dir: str        # Directory for model files
+    checkpoint_dir: str   # Directory for checkpoints
+    checkpoint_name: str  # Name for checkpoint files
+    model: pl.LightningModule  # Loaded neural network model
 
-    # parameters related to neural network architecture
-    nn_type: Literal["MLP", "BNN", "hetMLP", "CNN", "NODE"]
-    nn_activation: str
-    nn_output_activation: str
-    nn_output_dim: int
-    nn_hidden_dims: Sequence[int]
-    nn_weight_decay: float
-    nn_dropout_rates: Sequence[float]
-    nn_filter_sizes: Sequence[int]
-    nn_kernel_sizes: Sequence[int]
-    nn_k_grid: np.ndarray
+    # Neural network architecture parameters
+    nn_type: Literal["MLP", "CNN"]  # Type of neural network (CNN is in testing)
+    nn_activation: str       # Activation function name
+    nn_output_activation: str  # Output activation function name
+    nn_output_dim: int       # Dimension of output layer
+    nn_hidden_dims: Sequence[int]  # Dimensions of hidden layers
+    nn_weight_decay: float   # Weight decay for regularization
+    nn_dropout_rates: Sequence[float]  # Dropout rates for each layer
+    nn_filter_sizes: Sequence[int]  # Filter sizes for CNN
+    nn_kernel_sizes: Sequence[int]  # Kernel sizes for CNN
+    nn_k_grid: np.ndarray    # K-grid for neural network
 
-    # parameters related to training mode
-    seed: int | None = None
-    feff_path_file: str
-    training_set_dir: str
-    training_data_prefix: str
-    param_ranges: dict
-    training_mode: bool
-    num_examples: int
-    spectrum_noise: bool
-    input_type: str
-    noise_range: Sequence[float]
-    k_range: Sequence[float]
-    r_range: Sequence[float]
-    k_weight: int
-    train_size_ratio: float
-    val_size_ratio: float
-    test_size_ratio: float
-    training_noise: bool
-    training_noise_range: Sequence[float]
+    # Training parameters
+    seed: int | None = None  # Random seed for reproducibility
+    feff_path_file: str      # Path to FEFF file
+    training_set_dir: str    # Directory for training data
+    training_data_prefix: str  # Prefix for training data files
+    param_ranges: dict       # Ranges for parameters
+    training_mode: bool      # Whether to train the model
+    num_examples: int        # Number of examples to generate
+    spectrum_noise: bool     # Whether to add noise to spectra
+    input_type: str          # Type of input (k, q, r)
+    noise_range: Sequence[float]  # Range for noise
+    k_range: Sequence[float]  # Range for k-space
+    r_range: Sequence[float]  # Range for r-space
+    k_weight: int            # K-weight for spectra
+    train_size_ratio: float  # Ratio of training data
+    val_size_ratio: float    # Ratio of validation data
+    test_size_ratio: float   # Ratio of test data
+    training_noise: bool     # Whether to add noise during training
+    training_noise_range: Sequence[float]  # Range for training noise
 
-    # parameters related to neural network hyperparameters
-    epochs: int
-    batch_size: int
-    learning_rate: float
+    # Hyperparameters
+    epochs: int              # Number of training epochs
+    batch_size: int          # Batch size for training
+    learning_rate: float     # Learning rate for optimizer
 
-    # synthetic spectra for training
-    synthetic_spectra: SyntheticSpectrum | SyntheticSpectrumS
-    data_loader: CrowPeasDataModule
-    history: dict = {"train/loss": [], "val/loss": []}
+    # Data components
+    synthetic_spectra: SyntheticSpectrum | SyntheticSpectrumS  # Generated synthetic spectra
+    data_loader: CrowPeasDataModule  # Data loader for training
+    history: dict = {"train/loss": [], "val/loss": []}  # Training history
 
-    # only used for validating the test results
-    x_test: torch.Tensor
-    y_test: torch.Tensor
-    denormalized_x_test: np.ndarray
-    denormalized_y_test: np.ndarray
-
-    test_pred: torch.Tensor
-    denormalized_test_pred: np.ndarray
+    # Test data
+    x_test: torch.Tensor     # Test input data
+    y_test: torch.Tensor     # Test target data
+    denormalized_x_test: np.ndarray  # Denormalized test input data
+    denormalized_y_test: np.ndarray  # Denormalized test target data
+    test_pred: torch.Tensor  # Test predictions
+    denormalized_test_pred: np.ndarray  # Denormalized test predictions
 
     def __init__(self) -> None:
+        """Initialize an empty CrowPeas instance."""
         pass
 
-    def load_config(self, config_file: str):
+    def load_config(self, config_file: str) -> 'CrowPeas':
+        """
+        Load a configuration file in TOML or JSON format.
+
+        Args:
+            config_file: Path to the configuration file.
+
+        Returns:
+            Self instance for method chaining.
+
+        Raises:
+            FileNotFoundError: If the configuration file does not exist.
+            ValueError: If the file format is not supported.
+        """
         if not os.path.exists(config_file):
             raise FileNotFoundError(f"Config file {config_file} not found")
 
         self.config_dir = os.path.dirname(config_file)
+        self.config_filename = config_file
 
+        # Determine file format and load accordingly
         if config_file.endswith("toml"):
-            self.config_filename = config_file
             with open(config_file, "r") as f:
                 self.config = toml.load(f)
         elif config_file.endswith("json"):
-            self.config_filename = config_file
             with open(config_file, "r") as f:
                 self.config = json.load(f)
         else:
             raise ValueError(
                 "File format not supported. Only TOML and JSON are supported."
             )
-        with open(config_file, "r") as f:
-            self.config = toml.load(f)
 
         return self
 
@@ -863,45 +860,21 @@ class CrowPeas:
         return self
 
     def load_model(self):
-        if self.nn_type.lower().startswith("bnn"):
-            self.model = BNN.load_from_checkpoint(
-                os.path.join(self.checkpoint_dir, self.checkpoint_name)
-            )
-        elif self.nn_type.lower().startswith("mlp"):
+        if self.nn_type.lower().startswith("mlp"):
             self.model = MLP.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name), strict=False
-            )
-        elif self.nn_type.lower().startswith("node"):
-            self.model = NODE.load_from_checkpoint(
-                os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
         elif self.nn_type.lower().startswith("cnn"):
             self.model = CNN.load_from_checkpoint(
                 os.path.join(self.checkpoint_dir, self.checkpoint_name)
-            )            
-        elif self.nn_type.lower().startswith("het"):
-            self.model = hetMLP.load_from_checkpoint(
-                os.path.join(self.checkpoint_dir, self.checkpoint_name)
             )
+        else:
+            raise ValueError(f"Unsupported model type: {self.nn_type}. Only MLP and CNN (testing) are supported.")
 
         return self
 
     def init_model(self):
-        if self.nn_type.lower().startswith("bnn"):
-            self.model = BNN(
-                hidden_layers=self.nn_hidden_dims,
-                output_size=self.nn_output_dim,
-                input_form=self.input_type,
-                k_min=self.k_range[0],
-                k_max=self.k_range[1],
-                r_min=self.r_range[0],
-                r_max=self.r_range[1],
-                rmax_out=6,
-                window="kaiser",
-                dx=1,
-                activation=self.nn_activation,
-            )
-        elif self.nn_type.lower().startswith("mlp"):
+        if self.nn_type.lower().startswith("mlp"):
             self.model = MLP(
                 hidden_layers=self.nn_hidden_dims,
                 dropout_rates=self.nn_dropout_rates,
@@ -917,21 +890,8 @@ class CrowPeas:
                 dx=1,
                 activation=self.nn_activation,
             )
-        elif self.nn_type.lower().startswith("node"):
-            self.model = NODE(
-                hidden_layers=self.nn_hidden_dims,
-                output_size=self.nn_output_dim,
-                input_form=self.input_type,
-                k_min=self.k_range[0],
-                k_max=self.k_range[1],
-                r_min=self.r_range[0],
-                r_max=self.r_range[1],
-                rmax_out=6,
-                window="kaiser",
-                dx=1,
-                activation=self.nn_activation,
-            )
         elif self.nn_type.lower().startswith("cnn"):
+            # CNN model is in testing
             self.model = CNN(
                 hidden_layers=self.nn_hidden_dims,
                 num_filters=self.nn_filter_sizes,
@@ -946,21 +906,9 @@ class CrowPeas:
                 dx=1,
                 input_form=self.input_type,
                 activation=self.nn_activation,
-            )            
-        elif self.nn_type.lower().startswith("het"):
-            self.model = hetMLP(
-                hidden_layers=self.nn_hidden_dims,
-                output_size=self.nn_output_dim,
-                k_min=self.k_range[0],
-                k_max=self.k_range[1],
-                r_min=self.r_range[0],
-                r_max=self.r_range[1],
-                rmax_out=6,
-                window="kaiser",
-                dx=1,
-                input_form=self.input_type,
-                activation=self.nn_activation,
             )
+        else:
+            raise ValueError(f"Unsupported model type: {self.nn_type}. Only MLP and CNN (testing) are supported.")
 
     def create_checkpoint_callback(
         self,
@@ -993,7 +941,16 @@ class CrowPeas:
         if not hasattr(self, "model") or self.model is None:
             self.init_model()
 
-        self.model = torch.compile(self.model)
+        # Try to compile the model, but fall back to eager mode if compilation fails
+        try:
+            import os
+            # Only attempt compilation if explicitly enabled via environment variable
+            if os.environ.get("CROWPEAS_COMPILE", "0").lower() in ("1", "true", "yes"):
+                self.model = torch.compile(self.model)
+                print("Model successfully compiled with torch.compile")
+        except Exception as e:
+            print(f"Model compilation skipped: {e}")
+            print("Using standard eager mode execution instead")
         checkpoint_callback = self.create_checkpoint_callback()
         
         # Create early stopping callback
@@ -1084,7 +1041,8 @@ class CrowPeas:
 
         self.model.eval()
 
-        self.denormalized_test_pred = predict_with_uncertainty_hetMLP(self.model, spectrum, self.norm_params_parameters)
+        # Use standard prediction with uncertainty
+        self.denormalized_test_pred = predict_with_uncertainty(self.model, spectrum, self.norm_params_parameters)
 
         return self
 
@@ -1129,22 +1087,12 @@ class CrowPeas:
         self.node_test_pred_list = []
 
         with torch.no_grad():
-            if network_type.lower().startswith("node"):
-                self.test_pred = self.model(self.x_test.to(self.model.device))
-            else:
-                self.test_pred = self.model(self.x_test.to(self.model.device))
+            self.test_pred = self.model(self.x_test.to(self.model.device))
 
-        if self.nn_type.lower().startswith("het"):
-            self.test_pred_mu, self.test_pred_sigma = self.test_pred # test_pred is a tuple for hetMLP
-            self.denormalized_x_test = self.denormalize_spectra(self.x_test)
-            self.denormalized_y_test = self.denormalize_data(self.y_test)
-            self.denormalized_test_pred = self.denormalize_data(self.test_pred_mu)
-        if self.nn_type.lower().startswith("node"):
-            print("node")
-        else:
-            self.denormalized_x_test = self.denormalize_spectra(self.x_test)
-            self.denormalized_y_test = self.denormalize_data(self.y_test)
-            self.denormalized_test_pred = self.denormalize_data(self.test_pred)
+        # Process predictions
+        self.denormalized_x_test = self.denormalize_spectra(self.x_test)
+        self.denormalized_y_test = self.denormalize_data(self.y_test)
+        self.denormalized_test_pred = self.denormalize_data(self.test_pred)
 
         return self
 
@@ -1152,7 +1100,8 @@ class CrowPeas:
 
         save_path = os.path.join(self.config_dir, self.output_dir) + save_path 
 
-        parameter_name_dict = {0: "A", 1: "$\Delta R (Å)$", 2: "$\sigma^2 (Å^{2})$", 3: "$E_0$ (eV)"}
+        # Use raw strings for LaTeX to avoid invalid escape sequences
+        parameter_name_dict = {0: "A", 1: r"$\Delta R (Å)$", 2: r"$\sigma^2 (Å^{2})$", 3: r"$E_0$ (eV)"}
 
         if not hasattr(self, "denormalized_y_test") or not hasattr(
             self, "denormalized_test_pred"
@@ -1326,7 +1275,7 @@ class CrowPeas:
             linestyle="--",
             color="black",
             linewidth=2,
-            label="$\chi$(k) True",
+            label=r"$\chi$(k) True",
         )
 
         ax.plot(
@@ -1335,7 +1284,7 @@ class CrowPeas:
             linestyle="--",
             color="blue",
             linewidth=2,
-            label="$\chi$(q) True",
+            label=r"$\chi$(q) True",
         )
         ax.plot(
             k_grid,
@@ -1343,7 +1292,7 @@ class CrowPeas:
             linestyle="-",
             color="red",
             linewidth=2,
-            label="$\chi$(q) Predicted",
+            label=r"$\chi$(q) Predicted",
         )
 
         ax.set_xlabel(r"$ k \ \rm (\AA^{-1})$", fontsize=14)
@@ -1726,7 +1675,7 @@ class CrowPeas:
                 [min_artemis[2]-0.01, max_artemis[2]+0.01],
                 'r--'
             )
-            axs_params[2].set_title('$\sigma^{2}$')
+            axs_params[2].set_title(r'$\sigma^{2}$')
             axs_params[2].set_xlabel('NN')
             axs_params[2].set_ylabel('Artemis')
             axs_params[2].tick_params(axis='both', which='major', labelsize=8)
@@ -1740,7 +1689,7 @@ class CrowPeas:
             axs_params[3].plot(
                 [-10, 10], [-10, 10], 'r--'
             )
-            axs_params[3].set_title('$\Delta$E0')
+            axs_params[3].set_title(r'$\Delta$E0')
             axs_params[3].set_xlabel('NN')
             axs_params[3].set_ylabel('Artemis')
             axs_params[3].tick_params(axis='both', which='major', labelsize=8)
@@ -2041,9 +1990,9 @@ class CrowPeas:
         contour = axes[0].contourf(param1_grid, param2_grid, mse_grid, levels=50, cmap='viridis')
         plt.colorbar(contour, ax=axes[0], label='MSE')
         axes[0].plot(param1_val, param2_val, 'ro', markersize=8, label='Predicted Values')
-        axes[0].set_xlabel("$\Delta$R")
-        axes[0].set_ylabel('$\sigma^{2}$')
-        axes[0].set_title('Objective Landscape around fixed A and $\Delta E_{0}$')
+        axes[0].set_xlabel(r"$\Delta$R")
+        axes[0].set_ylabel(r'$\sigma^{2}$')
+        axes[0].set_title(r'Objective Landscape around fixed A and $\Delta E_{0}$')
         # make fonts larger
         axes[0].tick_params(axis='both', which='major', labelsize=8)
 
@@ -2605,7 +2554,7 @@ class CrowPeas:
         ax0.set_xlim([0, 20])
         ax0.set_title("Input Spectra")
         ax0.set_xlabel("k (Å$^{-1}$)")
-        ax0.set_ylabel("$\chi(k)k^2$ (Å$^{-2}$)")
+        ax0.set_ylabel(r"$\chi(k)k^2$ (Å$^{-2}$)")
 
         # Parameter plots with matching colors
         ax1 = plt.subplot(gs[0, 4])
@@ -2623,7 +2572,7 @@ class CrowPeas:
             ax2.plot(idx, plt_y_data_param_1[idx], 'o', color=colors[idx], markersize=8)
         ax2.plot(plt_y_data_param_1_pred, '--', color='black', label='Predicted', linewidth=2)
         ax2.set_ylim([-0.025, 0.01])
-        ax2.set_title("$\Delta R (Å)$")
+        ax2.set_title(r"$\Delta R (Å)$")
         # make values scientific notation
         ax2.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
         #ax2.set_xlabel("Spectra Index")
@@ -2635,7 +2584,7 @@ class CrowPeas:
             ax3.plot(idx, plt_y_data_param_2[idx], 'o', color=colors[idx], markersize=8)
         ax3.plot(plt_y_data_param_2_pred, '--', color='black', label='Predicted', linewidth=2)
         ax3.set_ylim([0.0015, 0.011])
-        ax3.set_title("$\sigma^2 (Å^{2})$")
+        ax3.set_title(r"$\sigma^2 (Å^{2})$")
         ax3.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
         #ax3.set_xlabel("Spectra Index")
         #ax3.set_ylabel("Value")
@@ -2646,7 +2595,7 @@ class CrowPeas:
             ax4.plot(idx, plt_y_data_param_3[idx], 'o', color=colors[idx], markersize=8)
         ax4.plot(plt_y_data_param_3_pred, '--', color='black', label='Predicted', linewidth=2)
         ax4.set_ylim([2.5, 7.5])
-        ax4.set_title("$\Delta E_0 (eV)$")
+        ax4.set_title(r"$\Delta E_0 (eV)$")
         #ax4.set_xlabel("Spectra Index")
         #ax4.set_ylabel("Value")
         #ax4.legend(bbox_to_anchor=(0.5, -0.2), fontsize=7)
@@ -2746,7 +2695,7 @@ class CrowPeas:
                     "sigma2": (0.003,0.01,"log"), 
                     "e0": (5,5,"sqrt")}
         const_dict = {"s02": 1}
-        plot_names = ["$A$", "$\Delta R$", "$\sigma^2$", "$\Delta E_0$"]
+        plot_names = [r"$A$", r"$\Delta R$", r"$\sigma^2$", r"$\Delta E_0$"]
         
         noise_levels = np.linspace(0.1, max_noise, 30)  # 10 points from 0 to max_noise
         param_errors = {param: [] for param in vary_dict.keys()}
@@ -2855,7 +2804,7 @@ class CrowPeas:
                     "sigma2": (0.003,0.01,"log"), 
                     "e0": (5,5,"sqrt")}
         const_dict = {"s02": 1}
-        plot_names = ["$A$", "$\Delta R$", "$\sigma^2$", "$\Delta E_0$"]
+        plot_names = [r"$A$", r"$\Delta R$", r"$\sigma^2$", r"$\Delta E_0$"]
         
         #noise_levels = np.linspace(0.1, max_noise, 30)  # 10 points from 0 to max_noise
         # noise levels but need to be integers
@@ -3001,7 +2950,7 @@ class CrowPeas:
             axes[idx].set_xlim([0, 20])
             axes[idx].set_title(f'Noise Level: {noise_level:.3f}')
             axes[idx].set_xlabel('k (Å$^{-1}$)')
-            axes[idx].set_ylabel('$\chi(k)k^2$')
+            axes[idx].set_ylabel(r'$\chi(k)k^2$')
             axes[idx].legend()
             axes[idx].grid(True)
         

@@ -1,27 +1,36 @@
-"""Console script for crowpeas."""
+"""Console script for crowpeas.
+
+This module implements the command-line interface for the crowpeas package,
+providing commands for configuration generation, training, validation, and
+prediction on experimental data.
+"""
 
 import typer
 from rich.console import Console
-from typing import Annotated
+from typing import Annotated, Optional
 from pathlib import Path
 import os
 import shutil
 
 
+# Directory containing package resources
 DIR_PATH = Path(__file__).parent
 
 
+# Create Typer app with help displayed when no arguments are provided
 app = typer.Typer(
     no_args_is_help=True,
-    # callback=lambda: typer.echo(app.rich_help_panel),
+    help="EXAFS fitting tool using Neural Networks",
 )
+
+# Rich console for formatted output
 console = Console()
 
 
 @app.command()
 def main(
     config: Annotated[
-        str | None, typer.Argument(help="Config file path [toml or json]")
+        Optional[str], typer.Argument(help="Config file path [toml or json]")
     ] = None,
     generate: Annotated[
         bool, typer.Option("--generate", "-g", help="Generate config file")
@@ -31,7 +40,7 @@ def main(
         typer.Option(
             "--training",
             "-t",
-            help="Option to train the model. True: Always train, False(default): Train only when it is configured in the config",
+            help="Option to train the model. True: Always train, False(default): Train only when configured in the config",
         ),
     ] = False,
     dataset: Annotated[
@@ -39,7 +48,7 @@ def main(
         typer.Option(
             "--dataset",
             "-d",
-            help="Option to generate dataset. True: Always generate, False(default): Generate only when it is configured in the config",
+            help="Option to generate dataset. True: Always generate, False(default): Generate only when configured in the config",
         ),
     ] = False,
     resume: Annotated[
@@ -63,10 +72,9 @@ def main(
         typer.Option(
             "--experiment",
             "-e",
-            help="Option to use a trained model to make predictions on experimnetal data. True: predict on experimental data, False(default): Do not predict on experimental data",
+            help="Option to use a trained model to make predictions on experimental data. True: predict on experimental data, False(default): Do not predict on experimental data",
         ),
     ] = False,
-
     plot: Annotated[
         bool,
         typer.Option(
@@ -75,14 +83,21 @@ def main(
             help="Option to plot experimental data. True: plot experimental data, False(default): Do not plot experimental data",
         ),
     ] = False,
-
     data_path: Annotated[
-        str | None, typer.Option("--data-path", help="Data path required when using --plot option")
+        Optional[str], typer.Option("--data-path", help="Data path required when using --plot option")
     ] = None,
 ):
     """
-    Crowpeas is a tool to perform a neural network based EXAFS analysis.
-    This cli will provide a training, prediction and evaluation interface.
+    Crowpeas: Neural Network-based EXAFS Analysis Tool
+
+    This command-line interface provides functionality for training neural networks
+    on EXAFS data, making predictions on experimental data, and evaluating results.
+
+    Usage Examples:
+        crowpeas -g                      # Generate a config file
+        crowpeas -d -t -v config.toml    # Generate dataset, train model, and validate
+        crowpeas -e config.toml          # Run predictions on experimental data
+        crowpeas -p --data-path data.dat # Plot experimental data
     """
     if plot and not data_path:
         raise typer.BadParameter("Ploting requires data path!")
@@ -114,11 +129,16 @@ def main(
         plot_crowpeas(data_path)
 
 
-def generate_config(config: str):
+def generate_config(config: str) -> None:
     """
-    Generate a config file for the crowpeas tool.
-    """
+    Generate a sample configuration file and required FEFF file.
 
+    This function copies the sample config and FEFF files from the package
+    to the specified location, providing a starting point for users.
+
+    Args:
+        config: Path where the configuration file should be created
+    """
     config_path = os.path.join(DIR_PATH, "./sample_config.toml")
     feff_path = os.path.join(DIR_PATH, "./Pt_feff0001.dat")
 
@@ -135,30 +155,47 @@ def run_crowpeas(
     resume: bool,
     validate: bool,
     experiment: bool,
-):
+) -> None:
+    """
+    Run the main crowpeas workflow based on command-line options.
+
+    This function orchestrates the crowpeas workflow, including dataset generation,
+    model training, validation, and prediction on experimental data.
+
+    Args:
+        config: Path to the configuration file
+        training: Whether to force training mode
+        dataset: Whether to force dataset generation
+        resume: Whether to resume training from a checkpoint
+        validate: Whether to validate the model
+        experiment: Whether to run on experimental data
+    """
     from crowpeas.core import CrowPeas
 
     console.print(f"Running crowpeas with config file: {config}")
 
+    # Initialize CrowPeas and load configuration
     cp = CrowPeas()
     cp.load_config(config)
     cp.load_and_validate_config()
 
+    # Handle dataset generation/loading
     if dataset:
         console.print("Force dataset generation mode")
         cp.init_synthetic_spectra(generate=True)
         cp.save_training_data()
         cp.save_config()
-
     else:
         console.print("Trying to load dataset, if exists")
         cp.load_synthetic_spectra()
         cp.save_config()
 
+    # Handle model loading for resuming training
     if resume:
         console.print("Read checkpoint and resume training")
         cp.load_model()
 
+    # Handle model training
     if training:
         console.print("Force training mode")
         cp.training_mode = True
@@ -169,6 +206,7 @@ def run_crowpeas(
         cp.train()
         cp.plot_training_history()
 
+    # Handle model validation
     if validate:
         console.print("Validating the config file")
         cp.validate_model()
@@ -176,18 +214,22 @@ def run_crowpeas(
         console.print("The parity plot is generated at parity.png")
         cp.plot_test_spectra(1, save_path="/1.png")
 
+    # Handle experimental prediction
     if experiment:
         console.print("Looking for experimental config file")
-        #cp.predict_on_experimental_data()
         cp.plot_results()
         cp.save_predictions_to_toml("predictions.toml")
-        
 
-    return
 
-def plot_crowpeas(
-    dataset_dir: str | None,
-):
+def plot_crowpeas(dataset_dir: str) -> None:
+    """
+    Plot EXAFS data using crowpeas.
+
+    This function creates visualizations of EXAFS data in both k-space and r-space.
+
+    Args:
+        dataset_dir: Path to the dataset directory containing EXAFS data
+    """
     from crowpeas.core import CrowPeas
 
     console.print(f"Plotting {dataset_dir} with crowpeas")

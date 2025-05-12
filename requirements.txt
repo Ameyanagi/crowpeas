@@ -10,3 +10,9 @@ torchbnn
 torchmetrics
 typer
 xraylarch
+numdifftools
+uncertainties
+torchdiffeq
+plotext
+scipy
+torchinfo
