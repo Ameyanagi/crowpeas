@@ -1,15 +1,11 @@
 # crowpeas
 
-[![PyPI Version](https://img.shields.io/pypi/v/crowpeas.svg)](https://pypi.python.org/pypi/crowpeas)
-[![Build Status](https://img.shields.io/travis/Ameyanagi/crowpeas.svg)](https://travis-ci.com/Ameyanagi/crowpeas)
-[![Documentation Status](https://readthedocs.org/projects/crowpeas/badge/?version=latest)](https://crowpeas.readthedocs.io/en/latest/?version=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## EXAFS Fitting using Neural Networks
 
 Crowpeas is a Python package for Extended X-ray Absorption Fine Structure (EXAFS) fitting using neural networks. It provides tools to generate synthetic spectral data, train various neural network models, and make predictions on experimental data.
 
-![EXAFS Fitting Illustration](https://raw.githubusercontent.com/Ameyanagi/crowpeas/main/images/illustration.png)
 
 ## Features
 
@@ -33,7 +29,7 @@ The easiest way to install crowpeas is using the provided installation script, w
 
 ```bash
 # Clone the repository
-git clone https://github.com/Ameyanagi/crowpeas.git
+git clone https://github.com/BNL-ML-Group/Crowpeas.git
 cd crowpeas
 
 # Run the installation script
@@ -63,7 +59,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 2. **Install crowpeas**:
 
 ```bash
-pip install git+https://github.com/Ameyanagi/crowpeas
+pip install git+https://github.com/BNL-ML-Group/Crowpeas.git
 ```
 
 ## Quick Start
@@ -123,7 +119,6 @@ output_dim = 4
 hidden_dims = [1024, 516, 516, 516]
 ```
 
-See [the documentation](https://crowpeas.readthedocs.io/) for detailed configuration options.
 
 ## Command-Line Interface
 
@@ -142,9 +137,6 @@ Crowpeas provides a rich command-line interface with the following options:
 
 - `CROWPEAS_COMPILE`: Set to "1", "true", or "yes" to enable PyTorch model compilation for faster execution. Requires a working C++ compiler (default: disabled).
 
-## Documentation
-
-Full documentation is available at [https://crowpeas.readthedocs.io/](https://crowpeas.readthedocs.io/)
 
 ## Development
 
